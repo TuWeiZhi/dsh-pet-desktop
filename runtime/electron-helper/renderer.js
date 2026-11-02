@@ -117,7 +117,7 @@ async function boot() {
       scheduleReboot();
       return;
     }
-    for (const s of sprites) s.dispose();
+    for (const s of sprites) await s.dispose();
     sprites = [new PetSprite(pet)];
     window.__dshPetDebug.configOk = true;
     window.__dshPetDebug.spriteCount = sprites.length;

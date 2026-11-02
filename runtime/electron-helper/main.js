@@ -66,6 +66,8 @@ const { shouldLinearize, resolveForcedScale, resolvePetScale } = require('./dpi-
 // 托盘的平台差异（模板图 / 左键是否自动弹菜单 / Dock）：规则住在模块里，main.js 只接线
 const { trayPlatform } = require('./tray-platform.js');
 const { buildDeskGeometry } = require('./desktop-geometry.js');
+const { registerNoteStorage, flushNoteWindows, resumeNoteWindows, noteQuitGuard } = require('./note-storage.js');
+const { createDesktopControls } = require('./desktop-controls.js');
 
 // 允许无用户手势直接播放（余额动画等）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -90,6 +92,13 @@ if (HELPER_USER_DATA) {
     console.error('[dsh-pet-desktop-helper] userData override failed:', String(e && e.message ? e.message : e));
   }
 }
+
+const noteStore = registerNoteStorage(ipcMain, path.join(app.getPath('userData'), 'notes'), () => BrowserWindow.getAllWindows());
+const flushNotes = () => flushNoteWindows(BrowserWindow.getAllWindows(), noteStore);
+const noteExitError = error => {
+  console.error('[dsh-pet] 便签尚未保存，已取消退出', error);
+  electronApi.dialog.showErrorBox('便签未能保存', '已取消退出。请先复制便签内容，检查磁盘空间后重试。');
+};
 
 /** DPI 探测子进程模式：不建窗口，只把主屏 scaleFactor 打到 stdout 就退出（见 probePrimaryScale） */
 const DPI_PROBE = process.env.DSH_PET_DPI_PROBE === '1';
@@ -724,7 +733,13 @@ let tray = null;
 
 /** 写回某只宠物的 display：宿主写完配置会重启本进程，响应可能永远不回（同 sprite.js 的 setPetDisplay） */
 function traySetPetDisplay(id, display) {
-  hostRequest('POST', PET_ROUTE + '/pet-display', JSON.stringify({ id, display })).catch((e) => {
+  flushNotes().then(async () => {
+    const response = await hostRequest('POST', PET_ROUTE + '/pet-display', JSON.stringify({ id, display }));
+    if (response.status < 200 || response.status >= 300) throw new Error('HTTP ' + response.status);
+    const result = JSON.parse(response.body);
+    if (result.ok === false) throw new Error(result.reason || result.error || '显示位置更新失败');
+  }).catch(async (e) => {
+    await resumeNoteWindows(BrowserWindow.getAllWindows());
     console.error('[dsh-pet-desktop-helper] tray pet-display failed:', String(e && e.message ? e.message : e));
   });
 }
@@ -748,7 +763,9 @@ const STANDALONE_DESKTOP = process.env.DSH_PET_SETTINGS_MENU === '1';
  * x-dsh-pet-token，令牌与端口都在宿主注入的 DSH_PET_SITE_URL 里：
  * `http://127.0.0.1:<port>/standalone-ai/#token=<43 字符>`。
  */
-function requestAppQuit() {
+async function requestAppQuit({ preserveOnFailure = false } = {}) {
+  try { await flushNotes(); }
+  catch (error) { if (preserveOnFailure) throw error; noteExitError(error); return; }
   let endpoint = '';
   let token = '';
   try {
@@ -763,7 +780,7 @@ function requestAppQuit() {
     app.exit(0);
     return;
   }
-  fetch(endpoint, { method: 'POST', headers: { 'x-dsh-pet-token': token } })
+  return fetch(endpoint, { method: 'POST', headers: { 'x-dsh-pet-token': token } })
     .then((resp) => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       // 宿主受理后会先停掉本进程，安静等它动手即可（它退出后管道断开，兜底也会让本进程退）
@@ -773,6 +790,7 @@ function requestAppQuit() {
         '[dsh-pet-desktop-helper] shutdown request failed:',
         String(e && e.message ? e.message : e),
       );
+      if (preserveOnFailure) throw e;
       app.exit(0);
     });
 }
@@ -824,20 +842,35 @@ async function startTray() {
       checked: isDesktopDisplay(pet.display),
       click: () => traySetPetDisplay(pet.id, toggleDisplay(pet.display)),
     }));
+    let trayMenu;
+    const controls = STANDALONE_DESKTOP ? createDesktopControls({
+      app, dialog: electronApi.dialog, shell,
+      version: require('../../package.json').version,
+      appRoot: path.resolve(__dirname, '../..'),
+      directory: path.join(app.getPath('userData'), 'updates'),
+      beforeInstall: flushNotes,
+      quit: () => requestAppQuit({ preserveOnFailure: true }),
+      resume: () => resumeNoteWindows(BrowserWindow.getAllWindows()),
+      onChange: () => { if (trayMenu) controls.refresh(trayMenu); },
+    }) : null;
     const appItems = STANDALONE_DESKTOP
       ? [
           ...(petItems.length ? [{ type: 'separator' }] : []),
           ...(SETTINGS_URL
             ? [{ label: 'AI 设置', click: () => void shell.openExternal(SETTINGS_URL) }]
             : []),
+          ...controls.items(),
+          { type: 'separator' },
           { label: '退出桌宠', click: () => requestAppQuit() },
         ]
       : [];
     tray = new Tray(trayIcon());
     tray.setToolTip('dsh-pet 桌面宠物');
-    tray.setContextMenu(Menu.buildFromTemplate([...petItems, ...appItems]));
+    trayMenu = Menu.buildFromTemplate([...petItems, ...appItems]);
+    tray.setContextMenu(trayMenu);
+    tray.on('right-click', () => controls?.refresh(trayMenu));
     // Windows 上 setContextMenu 只接管右键，左键默认什么都不做（macOS 相反：左键即弹菜单）
-    if (TRAY_PLATFORM.leftClickPopsMenu) tray.on('click', () => tray.popUpContextMenu());
+    if (TRAY_PLATFORM.leftClickPopsMenu) tray.on('click', () => { controls?.refresh(trayMenu); tray.popUpContextMenu(); });
   } catch (e) {
     console.error('[dsh-pet-desktop-helper] tray init failed:', String(e && e.message ? e.message : e));
   }
@@ -1305,7 +1338,9 @@ app.whenReady().then(() => {
 // 退出时销毁托盘图标：不销毁会在 Windows 通知区留下「幽灵图标」（鼠标划过才消失）。
 // 注意宿主改 display 时是 SIGTERM/SIGKILL 硬杀（helper-process.ts），Windows 上那是
 // TerminateProcess、拦不到，所以这条只覆盖优雅退出（窗口全关、宿主存活探测判定退出等）。
-app.on('before-quit', () => {
+const guardNoteQuit = noteQuitGuard(app, () => BrowserWindow.getAllWindows(), noteStore, noteExitError);
+app.on('before-quit', event => {
+  if (guardNoteQuit(event)) return;
   if (!tray) return;
   try {
     tray.destroy();

@@ -68,6 +68,14 @@ const mustExist = [
   'runtime/electron-helper/constants.js',
   'runtime/electron-helper/preload.js',
   'runtime/electron-helper/index.html',
+  'runtime/electron-helper/note.js',
+  'runtime/electron-helper/note.css',
+  'runtime/electron-helper/note-saving.js',
+  'runtime/electron-helper/note-storage.js',
+  'runtime/electron-helper/desktop-controls.js',
+  'runtime/electron-helper/desktop-updates.js',
+  'assets/pic/note-holding-look-up.png',
+  'build/installer.nsh',
   'assets/config.jsonc',
   'assets/logo.png',
   'build/icon.ico',
@@ -89,6 +97,9 @@ const syntaxTargets = [
   'runtime/electron-helper/constants.js',
   'runtime/electron-helper/preload.js',
 ];
+syntaxTargets.push('runtime/electron-helper/note.js', 'runtime/electron-helper/note-saving.js',
+  'runtime/electron-helper/note-storage.js', 'runtime/electron-helper/desktop-controls.js',
+  'runtime/electron-helper/desktop-updates.js');
 for (const rel of syntaxTargets) {
   const r = spawnSync(process.execPath, ['--check', join(root, rel)], { encoding: 'utf8' });
   check(r.status === 0, rel + (r.status === 0 ? '' : '\n' + (r.stderr || '').trim()));

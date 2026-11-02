@@ -32,3 +32,6 @@ jobs:
       # lib/ 是提交进仓库的产物，自检脚本只用 node 内置模块，不需要 npm ci
       - name: Verify desktop package
         run: node tools/verify-desktop.mjs
+
+      - name: Note and tray regression tests
+        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts

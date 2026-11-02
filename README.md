@@ -11,8 +11,8 @@
   <img alt="fork of" src="https://img.shields.io/badge/based%20on-dsh--pet%200.4.4-informational">
 </p>
 
-> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.4.4-setup.exe`，双击安装即可。
-> 安装包自带 Electron 运行时，**不联网下载任何东西**；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
+> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.5.0-setup.exe`，双击安装即可。
+> 安装包自带 Electron 运行时，安装时无需额外下载运行环境；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
 
 本仓库是插件版的**独立桌面分支**，与插件仓库 [TuWeiZhi/dsh-pet](https://github.com/TuWeiZhi/dsh-pet) 各自演进：
 插件版的原始说明保留在 [README-PLUGIN.md](README-PLUGIN.md)，本文件只讲桌面版。
@@ -24,14 +24,14 @@
 从 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载：
 
 ```
-dsh-pet-0.4.4-setup.exe           # NSIS 安装程序，约 173 MB
-dsh-pet-0.4.4-setup.exe.blockmap  # 增量更新用（本版未接自动更新）
+dsh-pet-0.5.0-setup.exe           # Windows x64 安装程序
+dsh-pet-0.5.0-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
 ```
 
 自己构建的产物落在 `dist\`（该目录不入库）：
 
 ```
-dist\dsh-pet-0.4.4-setup.exe
+dist\dsh-pet-0.5.0-setup.exe
 dist\win-unpacked\                # 免安装目录，调试用
 ```
 
@@ -44,8 +44,12 @@ dist\win-unpacked\                # 免安装目录，调试用
 | 双击安装程序 | 可选安装目录；建桌面快捷方式 + 开始菜单项「dsh-pet 桌面宠物」；安装完自动启动 |
 | 启动应用 | 桌面上出现宠物；托盘出现图标 |
 | 双击第二次 | 不会起第二套，改为打开「桌宠设置」网页 |
-| 托盘图标右键 | 宠物显示/隐藏开关、**AI 设置**、**退出桌宠** |
+| 托盘图标右键 | 宠物显示/隐藏开关、**AI 设置**、**开机自启**、**检查更新**、**退出桌宠** |
+| 开机自启 | 勾选后在 Windows 登录时启动；默认不开启，可取消；卸载时清理本应用的启动项 |
+| 检查更新 | 检查本仓库 GitHub Releases，应用内下载 Windows 安装包并校验 SHA-256；下载期间可取消，完成后确认安装或选择稍后；安装前保存便签并退出桌宠 |
 | 宠物右键 → 首项 | **AI 设置**（独立版没有 `dsh://` 协议，所以不是"打开软件"） |
+| 鼠标悬停宠物 | 约 0.3 秒后举起便签牌；浅蓝实色玻璃观感，遮住头发、露出向上看的眼睛；默认约 10 行，长内容滚动，无字符上限或字符数显示 |
+| 便签编辑 | 编辑即时生效；停顿 400 毫秒后合并异步保存，持续输入时每 2 秒触发保存；收起、重载和正常退出前提交剩余草稿，不显示保存成功提示。鼠标离开宠物和便签区域约 0.45 秒后收起，中文组词期间等待选词结束；支持 `Esc` 收起和右键「便签」打开；没有标题栏和关闭按钮 |
 | 宠物右键其他项 | 碎碎念、对话、回到初始位置、重放动画、更换形象、更多、重载配置（**没有「查看余额」「显示位置」**） |
 | 退出桌宠 | 走 `POST /shutdown` 优雅收尾，不留后台进程 |
 | 卸载 | 控制面板「dsh-pet 桌面宠物」；`%APPDATA%\dsh-pet` 默认保留 |
@@ -59,7 +63,9 @@ dsh-pet\
   standalone-runtime.json    # 运行时端口与令牌，退出时删除
   logs\host.log              # 宿主日志，超 2 MB 滚动为 host.log.1
   runtime\                   # 启动器进程的 Electron 数据
-  helper-runtime\            # 桌宠 helper 进程的 Electron 数据（Chromium profile）
+  helper-runtime\            # 桌宠 helper 进程的 Electron 数据（旧 Local Storage 便签保留作迁移备份）
+    notes\                   # 每只宠物一份 UTF-8 文本便签，异步写入后替换旧文件
+    updates\                 # 下载并校验后的更新安装包
 ```
 
 ### 设置页（`http://127.0.0.1:<端口>/standalone-ai/#token=...`）
@@ -83,7 +89,7 @@ dsh-pet\
 
 ## 二、和插件版的差别（全部改动清单）
 
-只动了 6 个文件 + 新增 3 个文件。插件版原有的 `assets/ lib/ runtime/ src/ patches/` 内容原样保留。
+下面记录桌面版入口与打包改动；桌面专属便签在 `runtime/electron-helper/note.js`、`note.css` 中实现，抬眼托举素材为 `assets/pic/note-holding-look-up.png`。默认采用降低透明度的 B 浅蓝玻璃样式，正文覆盖于角色头发前方；通过 `electron tools/note-smoke.cjs --variants` 可生成样式对比图。材质由渐变和描边实现，不会模糊桌面上的其它窗口。网页插件端不显示便签。便签按宠物实例独立保存，不发送给 AI；清除 `helper-runtime` 数据目录会同时清除便签。
 
 ### 新增
 
@@ -163,12 +169,12 @@ npm run pack
 npm run dist
 ```
 
-产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.4.4-setup.exe`。
+产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.5.0-setup.exe`。
 
 ### 静默安装（脚本/自动化用）
 
 ```powershell
-Start-Process dist\dsh-pet-0.4.4-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
+Start-Process dist\dsh-pet-0.5.0-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
 ```
 
 ### 自检
@@ -220,7 +226,7 @@ $env:DSH_PET_DESKTOP_APP = "1"
 - [ ] AI 对话 / 碎碎念实际调用（需要真实 API Key，只验证了设置页读写与 `hasKey`）
 - [ ] 多显示器 / 高 DPI 下的定位（`dpi-linearization.js` 逻辑原样保留，未在新形态下实测）
 - [ ] 代码签名（当前 `no code signing certificate configured`，首次运行 SmartScreen 会拦）
-- [ ] 自动更新（未接 electron-updater）
+- [x] 托盘检查新版本、应用内下载、SHA-256 校验、确认后启动安装（手动触发，完整安装包更新）
 
 ---
 

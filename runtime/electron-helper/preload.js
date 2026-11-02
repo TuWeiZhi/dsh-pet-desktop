@@ -22,6 +22,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('petBridge', {
+  readNote(key, legacy) { return ipcRenderer.invoke('pet:note-read', key, legacy); },
+  writeNote(key, text) { return ipcRenderer.invoke('pet:note-write', key, text); },
+  queueNote(key, text) { ipcRenderer.send('pet:note-queue', key, text); },
+  flushNotes() { return ipcRenderer.invoke('pet:notes-flush'); },
+  resumeNotes() { return ipcRenderer.invoke('pet:notes-resume'); },
   setBounds(x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, marginL, marginT) {
     ipcRenderer.send('pet:set-bounds', {
       x,

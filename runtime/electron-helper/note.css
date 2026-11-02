@@ -1,0 +1,71 @@
+.pet-note[hidden] { display: none; }
+.pet-note {
+  --note-ink: #25395a;
+  --note-muted: #526784;
+  --note-rule: #7e9ac12b;
+  --note-scroll: #7a98bd;
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid #ffffffd9;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #f4f8ffe8, #cbdcf5db);
+  color: var(--note-ink);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 #b2c5e380, 0 10px 28px #304d7526;
+  pointer-events: auto;
+  font: 13px/1.5 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  animation: note-raise 160ms ease-out;
+}
+.pet-note[data-material='glass'] {
+  --note-ink: #203754;
+  --note-muted: #425c78;
+  --note-rule: #456a9629;
+  background: linear-gradient(145deg, #f5fafff7, #d5e6f9f2);
+  border-color: #ffffffde;
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 #ffffff80, 0 8px 26px #20426724;
+  border-radius: 18px;
+}
+.pet-note[data-material='paper'] {
+  --note-ink: #3a3d61;
+  --note-muted: #626780;
+  --note-rule: #8b8dab26;
+  --note-scroll: #9798ba;
+  background: #f0eefb;
+  border: 1px solid #d4d2e8;
+  border-radius: 14px 18px 16px 18px;
+  box-shadow: inset 0 0 0 3px #faf9ff, 0 4px 0 #c7c7dd, 0 9px 22px #373a6320;
+}
+.pet-note-text:focus-visible { outline: 2px solid #658ab4; outline-offset: 3px; }
+.pet-note-text {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  height: auto;
+  resize: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--note-scroll) transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 1px 3px;
+  background: repeating-linear-gradient(transparent 0 23px, var(--note-rule) 23px 24px);
+  color: var(--note-ink);
+  font: 14px/24px 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+.pet-note-text::placeholder { color: var(--note-muted); opacity: 1; }
+.pet-note-status { flex: none; color: var(--note-muted); font-size: 12px; }
+.pet-note-status.is-error { color: #a02828; }
+.pet-note-pose { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pet-note-pose[hidden] { display: none; }
+.pet-sprite.is-noting video.pet-video, .pet-sprite.is-noting .pet-bubble { visibility: hidden; }
+@keyframes note-raise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .pet-note { animation: none; } }

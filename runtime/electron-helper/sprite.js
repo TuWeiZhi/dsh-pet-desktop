@@ -66,7 +66,11 @@ class PetSprite {
     this.actionGapTimer = null; // 到点回来掷骰的定时器
     const bubbleFontPx = S.resolveFontPx(fontConf, this.size).bubble;
     const whisperFontPx = bubbleFontPx * WHISPER_FONT_RATIO * this.whisperScale;
-    this.margin = { t: Math.max(m, S.bubbleTopMarginOfPx(Math.max(bubbleFontPx, whisperFontPx), this.size)), r: m, b: m, l: m };
+    // 小尺寸宠物也为固定大小的便签预留可见区域；余量仍然点击穿透。
+    this.margin = {
+      t: Math.max(m, 300, S.bubbleTopMarginOfPx(Math.max(bubbleFontPx, whisperFontPx), this.size)),
+      r: Math.max(m, 156), b: m, l: Math.max(m, 156),
+    };
     window.__dshPetDebug.winMargin = this.margin;
     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
     this.pos = { x: 0, y: 0 };
@@ -215,6 +219,9 @@ class PetSprite {
     this.hit.style.height = ((S.HIT_BOX.y1 - S.HIT_BOX.y0) / 360) * 100 + '%';
     // 原先这里挂 title（原生系统提示）：已换成自绘浮层，但无障碍名称不能跟着丢
     this.hit.setAttribute('aria-label', this.pet.name);
+    this.hit.tabIndex = 0;
+    this.hit.setAttribute('role', 'button');
+    this.hit.setAttribute('aria-description', '悬停显示便签，按 Enter 编辑');
     this.bubble = document.createElement('div');
     this.bubble.className = 'pet-bubble';
     // 气泡可点时点一下有落点，两种意图分派（内容与显隐仍全部归 renderBubble，这里只吞事件 + 转交）：
@@ -242,6 +249,12 @@ class PetSprite {
 
     stage.appendChild(this.videoA);
     stage.appendChild(this.videoB);
+    this.notePose = document.createElement('img');
+    this.notePose.className = 'pet-note-pose';
+    this.notePose.src = '../../assets/pic/note-holding-look-up.png';
+    this.notePose.alt = '';
+    this.notePose.hidden = true;
+    stage.appendChild(this.notePose);
     stage.appendChild(this.hit);
     this.el.appendChild(this.bubble);
     this.el.appendChild(this.tip);
@@ -257,6 +270,35 @@ class PetSprite {
     this.inputRegionElements = new Set();
     this.inputRegionMutation = new MutationObserver(() => this.syncInputRegions());
     this.inputRegionMutation.observe(document.body, { childList: true, subtree: true });
+    this.note = new window.PetNotes.PetNote({
+      id: JSON.stringify([this.assetRoot, this.pet.id]),
+      name: this.pet.name,
+      mount: document.body,
+      getLayout: () => ({
+        anchor: { x: this.margin.l + this.size * 0.5, y: this.margin.t + this.bottomPad + this.height * 0.39 },
+        bounds: this.visibleClampRect() || { x: 0, y: 0, w: innerWidth, h: innerHeight },
+        body: { x: this.margin.l + this.hitRect.x, y: this.margin.t + this.hitRect.y, w: this.hitRect.w },
+      }),
+      canOpen: () => !this.dragState.active && !this.throwRef && !this.posFollow && !this.frozen && !this.menuOpen && !this.chatOpen,
+      onChange: (open) => {
+        if (open) {
+          this.stopMove();
+          this.setTip(false);
+        }
+        // 自定义宠物仍用自己的动画，不换成大肥鱼。
+        this.notePose.hidden = !open || this.assetRoot !== 'main';
+        this.el.classList.toggle('is-noting', open && this.assetRoot === 'main');
+        this.hit.setAttribute('aria-expanded', String(open));
+        window.__dshPetDebug.noteOpen = open;
+        this.syncInputBusy();
+        if (!open && !this.inputBusy()) this.setInteractive(false);
+        const front = this.front === 0 ? this.videoA : this.videoB;
+        if (!open && front.ended) this.handleEnded();
+      },
+    });
+    this.hit.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this.note.show(true); }
+    }, { signal: ac.signal });
     this.hit.addEventListener('pointerdown', (e) => this.onPointerDown(e), { signal: ac.signal });
     this.hit.addEventListener('pointermove', (e) => this.onPointerMove(e), { signal: ac.signal });
     this.hit.addEventListener('click', (e) => this.onClick(e), { signal: ac.signal });
@@ -273,6 +315,7 @@ class PetSprite {
       () => {
         // 切到其它应用后旧菜单不应继续占着整个透明窗口；丢失松手时也释放拖拽。
         this.closeMenu();
+        this.note.close();
         if (this.dragState.active) this.onPointerUp();
         if (!this.chatOpen) this.setInteractive(false);
       },
@@ -285,6 +328,7 @@ class PetSprite {
         // 拖拽中与对话弹窗开着都不恢复：前者会绕过 busy 造成穿透并丢失 pointerup，
         // 后者要留光标回来点输入框。
         this.closeMenu();
+        this.note.setHover(false, false);
         if (!this.chatOpen && !this.dragState.active) this.setInteractive(false);
       },
       { signal: ac.signal },
@@ -325,6 +369,7 @@ class PetSprite {
 
   dispose() {
     this.ac.abort();
+    const saved = this.note.dispose();
     this.inputRegionMutation.disconnect();
     this.inputRegionResize.disconnect();
     this.inputRegionElements.clear();
@@ -341,6 +386,7 @@ class PetSprite {
     this.stopSquash();
     this.stopMove();
     this.el.remove();
+    return saved;
   }
 
   // 目标包围盒左上角（视口相对坐标）→ 移动窗口：窗口 = sprite + 四周外扩余量
@@ -429,6 +475,7 @@ class PetSprite {
     // 而光标存的是视口坐标，窗口一移，光标相对窗口的位置就变了，不重摆提示会跟着窗口漂走。
     // 只在显示时重摆：漫游逐帧调本函数，没显示提示时不做无谓的 DOM 写入。
     if (this.tipOn) this.renderTip();
+    if (this.note?.isOpen) { this.note.place(); this.syncInputRegions(); }
     // 实况标脏（节流上报，见 markPoseDirty）：所有位移都收口在本函数，所以这里一处就够
     this.markPoseDirty();
   }
@@ -706,6 +753,7 @@ class PetSprite {
 
   // 动画链（与浏览器 pickNext 语义一致，纯逻辑在 shared）
   playIdle() {
+    if (this.note?.isOpen) return;
     // 占用锁（issue #122 第 4 项）：锁生效时**不掷骰**。这里是随机链的**唯一**入口（只有动画播完
     // 才会走到），一句判断就把随机动画、随机转向、自主走位一起停住——宠物停在最后一帧，
     // 等持锁者的下一条指令（那走 /anim，不经这里）。与浏览器 pickNext 同一处判断。
@@ -766,6 +814,7 @@ class PetSprite {
       this.reportPlayback(done, 'ended');
     }
     if (this.dragState.active) return;
+    if (this.note?.isOpen) return;
     // 占用锁（issue #122 第 4 项）：冻结期间**动画链一律不推进**——事件动画播完就停在最后一帧。
     // 与浏览器 src/client/pet.ts 的 handleEnded 同一处判断、同一原因：下面四条路都会换源播放，
     // 而它们读的是**当前工作状态**（this.workState），跟 workTick 无关，所以 onWorkTick 那道门禁
@@ -1318,6 +1367,8 @@ class PetSprite {
     // 拖拽中宠物滞后于光标，光标可能跑到窗口外→窗口翻回穿透→本窗口收不到 pointermove/pointerup
     // （宠物"飞"出去，见 pointer-target.js）。这里上报"我正在用输入"，主进程据此绝不翻回穿透。
     this.syncInputBusy();
+    // 先建立拖拽占用再收牌，避免收起回调在 pointerdown 中途把原生窗口切回穿透。
+    this.note.close();
     // 弹弓：把「本次是否拉弓」与按下时的宠物中心（anchorX/Y）补进同一次拖拽状态。
     // 放在上报之后是为了不稀释上面那条源码守卫（它要求 busy 必须在建立状态后紧跟着上报）。
     this.dragState.sling = sling;
@@ -1478,6 +1529,7 @@ class PetSprite {
       this.dragState.active ||
       this.menuOpen ||
       this.chatOpen ||
+      this.note?.isOpen ||
       this.balanceClickable() ||
       this.bubbleDismissible()
     );
@@ -1556,7 +1608,7 @@ class PetSprite {
     const rects = [];
     // 控件矩形 = 主进程允许接收点击的区域（矩形外的余量区继续穿透）。
     // .pet-bubble.is-clickable 是余额气泡的展开态：它悬在宠物头顶的余量区，不登记就点不到。
-    const controls = [...document.querySelectorAll('.dsh-pet-menu-column, .dsh-pet-chat, .pet-bubble.is-clickable')];
+    const controls = [...document.querySelectorAll('.dsh-pet-menu-column, .dsh-pet-chat, .pet-sprite:not(.is-noting) .pet-bubble.is-clickable, .pet-note:not([hidden])')];
     for (const el of this.inputRegionElements) {
       if (!controls.includes(el)) {
         this.inputRegionResize.unobserve(el);
@@ -1668,12 +1720,14 @@ class PetSprite {
     const px = wx - this.margin.l;
     const py = wy - this.margin.t;
     const inBody = px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+    const inNote = this.note.containsPoint(wx, wy);
+    this.note.setHover(inBody, inNote);
     // 光标位置存**视口坐标**（窗口原点 + 窗口内坐标）：窗口随宠物移动时贴光标不会漂，见 renderTip。
     // 必须在 setTip 之前更新：setTip 变显隐时会立刻渲染一次，晚一步就会用上一次的光标摆位。
     if (inBody) this.tipCursor = { x: this.pos.x - this.margin.l + wx, y: this.pos.y - this.margin.t + wy };
-    this.setInteractive(inBody);
+    this.setInteractive(inBody || inNote);
     // 悬浮提示与可交互判定同源（同一个 inBody）：光标进身体 → 提示出现，离开 → 收起
-    this.setTip(inBody);
+    this.setTip(inBody && !this.note.isOpen);
     // 跟随光标：位置依赖光标，所以每次移动都得重摆一次（setTip 只在显隐变化时才渲染）
     if (this.tipOn) this.renderTip();
   }
@@ -1737,6 +1791,7 @@ class PetSprite {
     if (d.active || d.dragging || this.justDragged || this.menuOpen) return;
     e.preventDefault();
     this.stopThrow(); // 菜单弹出前停住飞行中的宠物
+    this.note.close();
     this.stopMove(); // 菜单悬停期间宠物不漫游
     // 桌面专属工具根项（打开网站 / 查看余额 / 碎碎念 / 对话 / 回到初始位置 / 重载配置）+ 共享菜单树（动作→分类→具体动画）
     // 碎碎念/对话项无条件显示：手动触发不受 whisperEnabled 限制（该字段只影响自动周期轮询）
@@ -1759,6 +1814,7 @@ class PetSprite {
     tools.push(
       { label: '碎碎念', action: 'whisper' },
       { label: '对话', action: 'chat' },
+      { label: '便签', action: 'note' },
       { label: '回到初始位置', action: 'home' },
     );
     // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
@@ -1803,6 +1859,10 @@ class PetSprite {
   onMenuAction(leaf, keepFacing) {
     this.closeMenu();
     if (!leaf || typeof leaf !== 'object') return;
+    if (leaf.action === 'note') {
+      this.note.show(true);
+      return;
+    }
     if (leaf.action === 'third-party') {
       // 第三方菜单项：只把 (owner, label) 交给宿主，具体做什么由注册方自己去查 /menu/events。
       // 带上本窗口的宠物 id——同一条菜单项在不同宠物上被点，注册方要能分辨是哪只。
@@ -1958,7 +2018,11 @@ class PetSprite {
   // 本请求由**即将被重启的这个进程**发出：响应可能永远不回（宿主杀进程时回调地址已失效），
   // 故不 await、不重试，失败只记日志——重载本身就是把本进程换掉。
   reloadDesktop() {
-    fetch(BASE + '/reload', { method: 'POST' }).catch((e) => {
+    return window.petBridge.flushNotes().then(async () => {
+      const response = await fetch(BASE + '/reload', { method: 'POST' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+    }).catch(async (e) => {
+      await window.petBridge.resumeNotes();
       console.warn('[dsh-pet] 重载配置请求失败（宿主不可达？）', e);
     });
   }
@@ -1972,11 +2036,17 @@ class PetSprite {
   // （宿主杀进程时回调地址已失效），故不 await、不重试，失败只记日志。
   setPetDisplay(display) {
     if (!display) return;
-    fetch(BASE + '/pet-display', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: this.pet.id, display }),
-    }).catch((e) => {
+    return window.petBridge.flushNotes().then(async () => {
+      const response = await fetch(BASE + '/pet-display', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: this.pet.id, display }),
+      });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const result = await response.json();
+      if (result.ok === false) throw new Error(result.reason || result.error || '显示位置更新失败');
+    }).catch(async (e) => {
+      await window.petBridge.resumeNotes();
       console.warn('[dsh-pet] 显示位置请求失败（宿主不可达？）', e);
     });
   }

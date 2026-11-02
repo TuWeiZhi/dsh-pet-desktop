@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-desktop",
   "productName": "dsh-pet",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "吃白饭的蓝色大肥鱼，赖在你桌面上不走了。独立 Windows 桌面宠物（不依赖 DSH）。",
   "author": {
     "name": "TuWeiZhi"
@@ -63,6 +63,7 @@
       "artifactName": "dsh-pet-${version}-setup.${ext}"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": true,
