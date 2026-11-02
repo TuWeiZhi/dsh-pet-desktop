@@ -1,0 +1,78 @@
+{
+  "name": "dsh-pet-desktop",
+  "productName": "dsh-pet",
+  "version": "0.4.4",
+  "description": "吃白饭的蓝色大肥鱼，赖在你桌面上不走了。独立 Windows 桌面宠物（不依赖 DSH）。",
+  "author": {
+    "name": "TuWeiZhi"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/TuWeiZhi/dsh-pet-desktop#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TuWeiZhi/dsh-pet-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TuWeiZhi/dsh-pet-desktop/issues"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --win --dir",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
+    "@electron-internal/extract-zip": "^1.0.5",
+    "@electron/get": "^5.1.0",
+    "openai": "7.39.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "electron": "43.3.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.tuweizhi.dshpet",
+    "productName": "dsh-pet",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "lib/**/*",
+      "!lib/types/**",
+      "runtime/**/*",
+      "assets/**/*",
+      "package.json",
+      "LICENSE",
+      "NOTICE.md"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "dsh-pet-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "dsh-pet 桌面宠物",
+      "uninstallDisplayName": "dsh-pet 桌面宠物",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
+  }
+}

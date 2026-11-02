@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>桌宠设置</title><link rel="stylesheet" href="/standalone-ai/settings.css">
+<script src="/standalone-ai/settings.js" defer></script></head><body>
+<main><header><span class="fish" aria-hidden="true">🐾</span><p class="local">独立桌宠 / 本机设置</p>
+<h1>桌宠设置</h1><p class="intro">桌宠的大小、碎碎念与动作节奏、本地语句池，以及可选的大模型接口。<br>所有设置仅保存在本机。</p></header>
+<form id="settings" aria-describedby="privacy">
+<p id="status" role="status" aria-live="polite">正在读取本机设置…</p>
+<fieldset><legend>桌宠外观</legend>
+<label for="petName">桌宠名字</label><input id="petName" name="petName" type="text" maxlength="64" placeholder="例如：蓝毛小女仆" spellcheck="false" aria-describedby="name-note"><p class="hint" id="name-note">显示在托盘菜单和气泡提示里。</p>
+<div class="pair"><div><label for="petSize">大小（宽度 px）</label><input id="petSize" name="petSize" type="number" min="120" max="1600" step="2" value="462" required aria-describedby="size-note"><p class="hint" id="size-note">高度自动 = 宽度 × 9/16。</p></div>
+<div><label class="check fixed" for="petFixed"><input id="petFixed" type="checkbox">固定在当前位置（不能拖动）</label><p class="hint">勾选后宠物不再被拖拽甩动，也不再自动换位。</p></div></div>
+</fieldset>
+<fieldset><legend>碎碎念与动作</legend>
+<label class="check"><input id="petWhisper" type="checkbox" aria-describedby="whisper-note">开启自动碎碎念</label>
+<p id="whisper-note" class="hint">开启后桌宠会按下面的间隔从本地语句池里抽一句冒泡，不调用模型、不产生费用。关掉后仍可用右键菜单手动碎碎念。</p>
+<div class="pair"><div><label for="whisperSec">碎碎念间隔（秒）</label><input id="whisperSec" name="whisperSec" type="number" min="60" max="86400" step="1" value="300" required><p class="hint">至少 60 秒。</p></div>
+<div><label for="actionSec">动作间隔（秒）</label><input id="actionSec" name="actionSec" type="number" min="0" max="600" step="1" value="0" required><p class="hint">两次随机动作之间至少歇多久；0 = 不歇。</p></div></div>
+<div class="pair"><div><label for="bubbleSec">气泡停留（秒）</label><input id="bubbleSec" name="bubbleSec" type="number" min="0" max="600" step="1" value="10" required><p class="hint">0 = 不自动消失（点一下收起）。</p></div>
+<div><label for="textScale">文字倍率</label><input id="textScale" name="textScale" type="number" min="0.8" max="3" step="0.05" value="1.35" required><p class="hint">0.8–3 倍。</p></div></div>
+</fieldset>
+<fieldset><legend>碎碎念语句池</legend>
+<p class="hint">一行一条。留空则使用内置的保底语句；填了之后只从本地抽，不再调用模型。</p>
+<textarea id="whisperLines" name="whisperLines" rows="10" spellcheck="false" placeholder="我在这儿哦。&#10;要不要休息一下？&#10;今天也辛苦啦。"></textarea>
+<div class="pool-row"><span id="pool-count" class="hint">共 0 条</span><button id="pool-sample" type="button">随机试一条</button><button id="pool-say" type="button">让宠物说这句</button></div>
+<p id="pool-note" class="hint" role="status" aria-live="polite"></p>
+</fieldset>
+<fieldset><legend>模型连接（可选）</legend>
+<p class="hint">只用于右键菜单里的「对话」。不填也能正常显示桌宠、碎碎念与互动。</p>
+<label for="protocol">接口协议</label><select id="protocol" name="protocol"><option value="openai-compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select>
+<label for="baseUrl">接口地址（Base URL）</label><input id="baseUrl" name="baseUrl" type="url" placeholder="https://example.com/v1" maxlength="2048" spellcheck="false" aria-describedby="endpoint-note"><p class="hint" id="endpoint-note">填写服务商提供的基础接口地址（支持 HTTP 与 HTTPS，通常以 /v1 结尾）。不要把密钥放进地址。</p>
+<label for="model">模型名称</label><input id="model" name="model" type="text" maxlength="200" placeholder="填写服务商的模型 ID，例如 deepseek-chat" spellcheck="false">
+<div class="key-heading"><label for="apiKey">API 密钥</label><span id="key-state" class="hint">尚未读取</span></div>
+<input id="apiKey" name="apiKey" type="password" autocomplete="new-password" maxlength="8192" placeholder="留空保留已保存的密钥" aria-describedby="key-note">
+<p id="key-note" class="hint">密钥只写入本机配置，不会回显。留空不会删除旧密钥。</p>
+<label class="check clear"><input id="clearApiKey" type="checkbox">清除已保存的密钥，并关闭 AI</label>
+<label class="check enabled"><input id="enabled" type="checkbox">启用 AI 对话</label>
+<div class="test-row"><button id="test-btn" type="button">测试连接</button><span id="test-result" class="test-result" role="status" aria-live="polite"></span></div>
+</fieldset>
+<footer><p id="privacy">所有配置与密钥仅保存在当前机器。<br>关闭 AI 后，桌宠仍可正常显示、移动与互动。</p><button id="save" type="submit" disabled>保存到本机</button></footer>
+</form><noscript>需要启用 JavaScript 才能保存设置。请从桌宠菜单打开本页。</noscript></main></body></html>

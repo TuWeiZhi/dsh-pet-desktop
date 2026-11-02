@@ -1,0 +1,133 @@
+diff --git a/lib/index.js b/lib/index.js
+index 86bc04c..12da45c 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -845,16 +845,42 @@ function warnOnce(key, message) {
+ }
+ /** 剥除 JSONC 注释（行注释 // 与块注释）得到纯 JSON */
+ function stripJsonc(src) {
+-	return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^\\:])\/\/.*$/gm, "$1").trim();
++	return src.replace(/^\uFEFF/, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^\\:])\/\/.*$/gm, "$1").trim();
+ }
+ /** 读取并解析 JSONC 文件；不存在/解析失败 → undefined（调用方决定处理） */
+ function readJsonc(path) {
++	let bytes;
+ 	try {
+-		const raw = JSON.parse(stripJsonc(readFileSync(path, "utf8")));
+-		return raw && typeof raw === "object" ? raw : void 0;
++		bytes = readFileSync(path);
+ 	} catch {
+ 		return void 0;
+ 	}
++	const decodings = [];
++	const hasBomLe = bytes.length >= 2 && bytes[0] === 255 && bytes[1] === 254;
++	const hasBomBe = bytes.length >= 2 && bytes[0] === 254 && bytes[1] === 255;
++	if (hasBomLe) decodings.push("utf16le");
++	if (hasBomBe) decodings.push("utf16be");
++	decodings.push("utf8");
++	if (!hasBomLe && !hasBomBe && bytes.length > 4) {
++		const sample = bytes.subarray(0, Math.min(bytes.length, 512));
++		let zeros = 0;
++		for (const byte of sample) if (byte === 0) zeros++;
++		if (zeros > sample.length / 4) decodings.push("utf16le");
++	}
++	for (const encoding of decodings) {
++		let text;
++		if (encoding === "utf16be") text = Buffer.from(bytes).swap16().toString("utf16le");
++		else text = bytes.toString(encoding);
++		try {
++			const raw = JSON.parse(stripJsonc(text));
++			if (raw && typeof raw === "object" && !Array.isArray(raw)) {
++				if (encoding !== "utf8") warnOnce("config-encoding:" + path, `用户配置不是 UTF-8（按 ${encoding} 读成功）：${path}，建议另存为 UTF-8`);
++				return raw;
++			}
++		} catch {}
++	}
++	warnOnce("config-unparsable:" + path, "用户配置读不出来（编码或 JSONC 语法问题），已临时回退包内默认值，原文件未被修改：" + path + " ｜ 修好后保存一次设置即可恢复；此前的备份见同目录 main-config.jsonc.bak-*");
++	return void 0;
+ }
+ function readUserConfig(paths) {
+ 	const file = effectiveUserFile(paths);
+@@ -1361,9 +1387,25 @@ function saveUserConfig(raw, existing) {
+ 	}
+ 	return outConfig;
+ }
++function backupUserConfig(paths) {
++	const file = effectiveUserFile(paths);
++	if (!file) return void 0;
++	try {
++		const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-");
++		const target = file + ".bak-" + stamp;
++		if (existsSync(target)) return target;
++		writeFileSync(target, readFileSync(file));
++		console.warn(`[dsh-pet] 已备份用户配置：${target}`);
++		return target;
++	} catch (error) {
++		console.warn(`[dsh-pet] 备份用户配置失败：${error instanceof Error ? error.message : String(error)}`);
++		return void 0;
++	}
++}
+ function syncUserConfigFromDefault(paths) {
+ 	const raw = readFileSync(paths.defaultFile, "utf8");
+ 	mkdirSync(dirname(paths.userFile), { recursive: true });
++	backupUserConfig(paths);
+ 	writeFileSync(paths.userFile, raw, "utf8");
+ }
+ function sliceMemoryRounds(messages, rounds) {
+@@ -3422,18 +3464,23 @@ async function ensureElectronDownload(options = {}) {
+ 	const log = (message) => console.log(`[dsh-pet] ${message}`);
+ 	const warn = (message) => console.warn(`[dsh-pet] ${message}`);
+ 	const startedAt = Date.now();
++	const attemptTimeoutMs = options.attemptTimeoutMs ?? Math.min(timeoutMs, 180 * 1e3);
++	const mirrors = (options.mirrors || String(process.env.DSH_PET_ELECTRON_MIRRORS || `${mirror}|https://github.com/electron/electron/releases/download/`)).split("|").map((s2) => s2.trim()).filter(Boolean);
+ 	log(`Electron not found, downloading v${version} (${PLAT}-${process.arch}) ...`);
+-	try {
+-		mkdirSync(targetDir, { recursive: true });
++	let lastError;
++	for (let attempt = 0; attempt < mirrors.length; attempt++) {
++		const base = mirrors[attempt];
++		log(`download attempt ${attempt + 1}/${mirrors.length}: ${base}`);
+ 		const controller = new AbortController();
+-		const timer = setTimeout(() => controller.abort(new Error(`Electron download timed out after ${timeoutMs}ms`)), timeoutMs);
++		const timer = setTimeout(() => controller.abort(new Error(`Electron download timed out after ${attemptTimeoutMs}ms`)), attemptTimeoutMs);
+ 		timer.unref?.();
+ 		let nextLogAt = Date.now() + 3e3;
+ 		try {
++			mkdirSync(targetDir, { recursive: true });
+ 			const zipPath = await downloadArtifact({
+ 				version: `v${version}`,
+ 				artifactName: "electron",
+-				mirrorOptions: { mirror: mirror.replace(/\/$/, "") + "/" },
++				mirrorOptions: { mirror: base.replace(/\/$/, "") + "/" },
+ 				downloadOptions: {
+ 					signal: controller.signal,
+ 					quiet: true,
+@@ -3453,14 +3500,16 @@ async function ensureElectronDownload(options = {}) {
+ 			const readySeconds = ((Date.now() - startedAt) / 1e3).toFixed(1);
+ 			log(`ready in ${readySeconds}s: ${exe}`);
+ 			return exe;
++		} catch (error) {
++			lastError = error;
++			warn(`download attempt ${attempt + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
+ 		} finally {
+ 			clearTimeout(timer);
+ 		}
+-	} catch (error) {
+-		warn(`ensure failed: ${error instanceof Error ? error.message : String(error)}`);
+-		warn("desktop pet unavailable. Set DSH_PET_ELECTRON_PATH to an existing Electron, or retry later.");
+-		return void 0;
+ 	}
++	warn(`ensure failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
++	warn("desktop pet unavailable. Set DSH_PET_ELECTRON_PATH to an existing Electron, or retry later.");
++	return void 0;
+ }
+ function defaultLaunch(options = {}) {
+ 	const electronPath = resolveElectronPath([options.electronPath]);
+@@ -4610,6 +4659,7 @@ function apply(ctx) {
+ 					}
+ 				};
+ 				await mkdir(userRoot, { recursive: true });
++				backupUserConfig(configPaths);
+ 				await writeFile(userConfigPath, JSON.stringify(clean, null, 2), "utf8");
+ 				syncDesktop();
+ 				return {

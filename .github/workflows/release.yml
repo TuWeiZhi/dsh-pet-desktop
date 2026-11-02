@@ -1,0 +1,47 @@
+# 发版流水线：推一个 `v*` 形式的 tag，就会在这里构建 NSIS 安装包并挂到同名 Release 上。
+#
+# 为什么放在 CI 而不是本地：安装包 173 MB，本地构建产物不入库（见 .gitignore 的 dist/），
+# 想让「代码 → 可下载的 exe」这条链可复现，就得有个干净的 Windows 环境跑一次。
+#
+# 注意：这里不签名（没有证书），Windows 首次运行会弹 SmartScreen 提示，属预期。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      - name: 发版前自检
+        run: node tools/verify-desktop.mjs
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建 NSIS 安装程序
+        run: npx electron-builder --win nsis
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 挂到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dsh-pet-*-setup.exe
+            dist/dsh-pet-*-setup.exe.blockmap
+          generate_release_notes: true
+          fail_on_unmatched_files: true

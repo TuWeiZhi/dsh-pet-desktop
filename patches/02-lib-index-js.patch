@@ -1,0 +1,387 @@
+diff --git a/lib/index.js b/lib/index.js
+index 158f771..86bc04c 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -500,6 +500,8 @@ const USER_TEXT = "随便说一句日常碎碎念，一句就好，20 字以内
+ function userTextWithMeme(meme) {
+ 	return "随便说一句日常碎碎念，一句就好，20 字以内。\n这次会配一张表情包一起显示，图的内容是：" + meme.name + "（" + meme.desc + "）。\n请让这句话和这张图的情绪/场景自然契合，像是配合画面说出来的；不要描述画面本身。";
+ }
++/** 【已停用】旧版碎碎念的 LLM 生成：碎碎念现在只从本地语句池取句子（见 publishWhisper），
++*  这里保留实现只为不改动包内其余符号与类型；生产路径不再调用它。 */
+ async function generateWhisper(ctx, system, meme, preferred) {
+ 	const candidates = modelCandidates(ctx, preferred);
+ 	if (candidates.length === 0) return {
+@@ -574,15 +576,18 @@ async function generateWith$1(ctx, llm, sel, system, meme) {
+ 
+ //#endregion
+ //#region src/host/whisper-policy.ts
+-function automaticWhisperSchedule(policy, petEnabled, configuredPeriodSec) {
+-	if (!policy) return {
+-		enabled: petEnabled,
+-		periodSec: configuredPeriodSec
+-	};
+-	const period = policy.whisperIntervalSec();
++/**
++* 碎碎念**是否开跑 / 多久跑一次**——现在完全由本地配置决定。
++*
++* 改造前这里还要看 DSH 的 standalone-AI 策略（isReady = 服务商配好了吗、canWhisper = 允许后台自动调模型吗），
++* 因为它真的要发模型请求。碎碎念改成纯本地语句池后这两道闸门失去意义，反而有害：
++* 没配 AI 的用户会连本地碎碎念都收不到。现在只认宠物自己的 whisperEnabled + 周期（下限 60s，防抖）。
++*/
++function automaticWhisperSchedule(petEnabled, configuredPeriodSec) {
++	const n = Number(configuredPeriodSec);
+ 	return {
+-		enabled: petEnabled && policy.isReady() && policy.canWhisper(),
+-		periodSec: Number.isFinite(period) ? Math.max(60, period) : 300
++		enabled: petEnabled,
++		periodSec: Number.isFinite(n) && n > 0 ? Math.max(60, n) : 300
+ 	};
+ }
+ 
+@@ -608,6 +613,20 @@ function pickMeme(pool, random = Math.random) {
+ 	const idx = Math.floor(random() * pool.length) % pool.length;
+ 	return pool[idx];
+ }
++/**
++* 碎碎念配图的**出现概率**（不是每句都配）：`whisperImageEnabled` 只是总开关，真正出图还要过这道闸。
++* 观感上「碎碎念以文字为主、图偶尔来一下」——0 = 永不配图，0.5 = 约一半，1 = 每句都配。
++*/
++const WHISPER_IMAGE_CHANCE = 0.5;
++/**
++* 碎碎念这一句要不要带图：总开关关着 / 没抽中概率 / 表情包池为空 → 不带图（纯文字）。
++* `random` 可注入（测试用），池子里的「抽哪一张」与「要不要抽」共用同一个随机源。
++*/
++function whisperMeme(conf, dirs, random = Math.random) {
++	if (!conf || conf.whisperImageEnabled !== true) return void 0;
++	if (random() >= WHISPER_IMAGE_CHANCE) return void 0;
++	return pickMeme(readMemePool(conf.memes, dirs), random);
++}
+ function matchMeme(pool, name$1) {
+ 	const key = String(name$1 ?? "").trim();
+ 	return key ? pool.find((m) => m.name === key) : void 0;
+@@ -788,6 +807,9 @@ const ID_FORBIDDEN = /[\\/:\x00-\x1f]/;
+ *   - `confineToScreen`：多屏是用户环境 / 使用习惯，不是宠物属性
+ *   - `font`：字体种类 / 字号 / 是否随宠物缩放是**看的人**的偏好，不是某个种类的属性——
+ *     同一套字体偏好用在所有宠物（含 pet pack）才符合预期
++*   - `whisperLines`：碎碎念语句池——用户自己写的一份话，所有宠物共用才谈得上"随手维护"
++*   - `whisperBubbleSec` / `whisperTextScale`：碎碎念气泡停留多久、文字多大——纯**阅读偏好**，
++*     同一个屏幕前的人看所有宠物，这两个值分开配没有意义
+ *
+ * 不在名单里的顶层字段基座仍是**内置默认**：`whisperPrompt`（人设）、`memes`（表情包）、
+ * `animations` / `animationWeights`（与素材根绑定）、`workStatusTexts`（文案）——一个种类一份
+@@ -807,7 +829,12 @@ const GLOBAL_DEFAULT_KEYS = [
+ 	"chatMemoryRounds",
+ 	"whisperModel",
+ 	"chatModel",
+-	"eventsRefreshSec"
++	"eventsRefreshSec",
++	// 本地语句池（用户层写一次对所有宠物生效；种类文件写了更高优先级的那份则覆盖）
++	"whisperLines",
++	// 碎碎念气泡的展示参数（纯视觉偏好：停留时长 / 文字倍率）
++	"whisperBubbleSec",
++	"whisperTextScale"
+ ];
+ /** 已告警过的 文件:字段（进程内去重：同一问题只告警一次，避免每请求刷屏；重启重置） */
+ const warnedKeys = new Set();
+@@ -957,10 +984,49 @@ function workStatusTextsValid(value) {
+ 	}
+ 	return true;
+ }
++/**
++* whisperLines 段校验：本地语句池 = 字符串数组（每项 trim 后非空）。
++*
++* 空数组**合法**：语义是"没有池子" → 消费端回落到 LLM 生成（保留旧行为）。
++* 上限只为拦住明显的手滑（贴进来一万行 / 单行塞一整本书），不是业务约束。
++*/
++function whisperLinesValid(value) {
++	if (!Array.isArray(value)) return false;
++	if (value.length > 20000) return false;
++	for (const line of value) {
++		if (typeof line !== "string") return false;
++		const s = line.trim();
++		if (s === "" || s.length > 2000) return false;
++	}
++	return true;
++}
++/**
++* whisperBubbleSec 校验：碎碎念气泡的**停留秒数**。
++*
++* 0 是**合法且有意义**的值——「不自动消失」（留到下一句碎碎念，或被别的气泡/清空顶掉）；
++* 所以下限是 0 而不是 > 0（与 eventsRefreshSec.action 同一个理由：0 是一种行为，不是缺值）。
++* 上限 600（10 分钟）只为拦住手滑（比如把毫秒当秒填成 10000）。
++*/
++function whisperBubbleSecValid(value) {
++	const n = Number(value);
++	return Number.isFinite(n) && n >= 0 && n <= 600;
++}
++/**
++* whisperTextScale 校验：碎碎念气泡的**文字倍率**（相对气泡正文 1×）。
++* 0.8×（比正文略小）到 3×（很大）；1.35× 是默认的「看得出来是重点」量级。
++* 低于 0.8 会小到读不清、高于 3 会撑爆气泡，两头都不给。
++*/
++function whisperTextScaleValid(value) {
++	const n = Number(value);
++	return Number.isFinite(n) && n >= 0.8 && n <= 3;
++}
+ /** 顶层标量字段的合法性（非法与缺失同处理：取默认值 + 告警） */
+ function topFieldValid(key, value) {
+ 	switch (key) {
+ 		case "whisperPrompt": return typeof value === "string" && value.length > 0;
++		case "whisperLines": return whisperLinesValid(value);
++		case "whisperBubbleSec": return whisperBubbleSecValid(value);
++		case "whisperTextScale": return whisperTextScaleValid(value);
+ 		case "chatMemoryRounds": {
+ 			const n = Number(value);
+ 			return Number.isFinite(n) && n >= 0;
+@@ -985,24 +1051,28 @@ function topFieldValid(key, value) {
+ 	}
+ }
+ /**
+-* eventsRefreshSec 段校验：事件名 → 间隔秒（正的有限数字）。
++* eventsRefreshSec 段校验：事件名 → 间隔秒（正的有限数字；**只有 `action` 允许 0**）。
++*
++* `action` 是"随机动作之间的停顿"：0 = 一个动作播完立刻抽下一个（旧行为），所以必须允许 0；
++* 其余键（whisper / balance）周期为 0 没有意义（会变成忙等），仍要求 > 0。
+ *
+ * 只校验「写下的每个值都合法」，**不**要求键集合与内置默认一致——这个字段和别的顶层字段
+-* 一样是**整段替换**：缺的键就是缺（消费端各自兜底 1800 / 300），多写的键原样保留
++* 一样是**整段替换**：缺的键就是缺（消费端各自兜底 1800 / 300 / 0），多写的键原样保留
+ * （不再像旧的逐键深合并那样静默丢弃不认识的键）。空对象合法（等于全走消费端兜底）。
+ */
+ function eventsRefreshSecValid(value) {
+ 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+-	for (const v of Object.values(value)) {
++	for (const [key, v] of Object.entries(value)) {
+ 		const n = Number(v);
+-		if (!Number.isFinite(n) || n <= 0) return false;
++		if (!Number.isFinite(n)) return false;
++		if (key === "action" ? n < 0 : n <= 0) return false;
+ 	}
+ 	return true;
+ }
+ /**
+ * 文件宠物条目的合并基座：内置默认 + 白名单字段改用**用户层**的值。
+ *
+-* 为什么：那 9 个字段是用户级成本/偏好/环境/节奏参数，不是种类属性——用户在设置页改一次，
++* 为什么：GLOBAL_DEFAULT_KEYS 里那些字段是用户级成本/偏好/环境/节奏参数，不是种类属性——用户在设置页改一次，
+ * 期望所有宠物（含 pet pack）都生效。没有这一步，文件宠物只能拿到内置默认值，
+ * 于是"设置页写着全局、实际只影响主宠物"（见 GLOBAL_DEFAULT_KEYS 的判据）。
+ *
+@@ -1231,6 +1301,22 @@ function saveUserConfig(raw, existing) {
+ 	if (cmr !== void 0 && !topFieldValid("chatMemoryRounds", cmr)) return null;
+ 	const cil = o.chatImageLimit;
+ 	if (cil !== void 0 && !topFieldValid("chatImageLimit", cil)) return null;
++	// whisperLines（本地语句池：设置页的大文本框写的就是这个，一行一条）：
++	// 与 chatImageLimit 同语义——传了就校验后进白名单，没传则走下面的透传保留。
++	// 落盘前归一化：逐条 trim、丢掉空行（用户在文本框里留的空行/缩进不是数据）。
++	const wl = o.whisperLines;
++	if (wl !== void 0 && !topFieldValid("whisperLines", wl)) return null;
++	// eventsRefreshSec（自动行为间隔：平衡周期 / 碎碎念周期 / 动作之间的停顿）：
++	// 与 whisperLines 同语义——传了就校验后进白名单，没传则走下面的透传保留。
++	// 整段替换字段，这里逐值收窄成数字后原样落盘（缺键 = 缺，由各消费端兜底）。
++	const ers = o.eventsRefreshSec;
++	if (ers !== void 0 && !topFieldValid("eventsRefreshSec", ers)) return null;
++	// whisperBubbleSec / whisperTextScale（碎碎念气泡的停留秒数与文字倍率）：
++	// 与 eventsRefreshSec 同语义——传了就校验后进白名单，没传则走下面的透传保留。
++	const wbs = o.whisperBubbleSec;
++	if (wbs !== void 0 && !topFieldValid("whisperBubbleSec", wbs)) return null;
++	const wts = o.whisperTextScale;
++	if (wts !== void 0 && !topFieldValid("whisperTextScale", wts)) return null;
+ 	const cleanModel = (v) => ({
+ 		provider: String(v.provider).trim(),
+ 		model: String(v.model).trim()
+@@ -1246,6 +1332,14 @@ function saveUserConfig(raw, existing) {
+ 	if (cm !== void 0) outConfig.chatModel = cleanModel(cm);
+ 	if (cmr !== void 0) outConfig.chatMemoryRounds = Number(cmr);
+ 	if (cil !== void 0) outConfig.chatImageLimit = Number(cil);
++	if (wl !== void 0) outConfig.whisperLines = (Array.isArray(wl) ? wl : []).map((s) => String(s).trim()).filter((s) => s !== "");
++	if (ers !== void 0) {
++		const o2 = {};
++		for (const [k, v] of Object.entries(ers)) o2[k] = Number(v);
++		outConfig.eventsRefreshSec = o2;
++	}
++	if (wbs !== void 0) outConfig.whisperBubbleSec = Number(wbs);
++	if (wts !== void 0) outConfig.whisperTextScale = Number(wts);
+ 	const bodyOwned = new Set(["pets"]);
+ 	if (ne !== void 0) bodyOwned.add("notificationsEnabled");
+ 	if (wie !== void 0) bodyOwned.add("whisperImageEnabled");
+@@ -1257,6 +1351,10 @@ function saveUserConfig(raw, existing) {
+ 	if (cm !== void 0) bodyOwned.add("chatModel");
+ 	if (cmr !== void 0) bodyOwned.add("chatMemoryRounds");
+ 	if (cil !== void 0) bodyOwned.add("chatImageLimit");
++	if (wl !== void 0) bodyOwned.add("whisperLines");
++	if (ers !== void 0) bodyOwned.add("eventsRefreshSec");
++	if (wbs !== void 0) bodyOwned.add("whisperBubbleSec");
++	if (wts !== void 0) bodyOwned.add("whisperTextScale");
+ 	if (existing && typeof existing === "object") for (const key of Object.keys(existing)) {
+ 		if (bodyOwned.has(key)) continue;
+ 		outConfig[key] = existing[key];
+@@ -4058,16 +4156,80 @@ function apply(ctx) {
+ 		const v = Number(conf.chatMemoryRounds);
+ 		return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 5;
+ 	};
+-	/** 生成/返回某宠物的一句碎碎念（周期 GET 与菜单手动触发共用的同一逻辑）：
+-	*  每只宠物独立生成（人设 = 它自己的 whisperPrompt，没写回落到所属条目）。生成成功就写进 S 的 pets.<id>.say——
+-	*  碎碎念 / 命令气泡 / 对话回复在前端本来就是**同一条展示链路**（同一个 triggerWhisper、
+-	*  同一个气泡槽、同一批 events.whisper 动画），所以合并成同一个叶子；"周期内不重复"由
+-	*  调度侧的 lastWhisperAt 保证，不再需要一份 whisperCache（多端共享也由 S 天然保证）。
+-	*  配图（whisperImageEnabled 开启时）：从表情包池**随机抽 1 张**，把描述注入指令并随文本一起写。
++	/**
++	* 内置保底语句：碎碎念在本地语句池为空时用的最后一道兜底。
+ 	*
+-	*  失败**带回真实 reason**（含 `unknown-pet`：目标宠物在"校验那次读"与这里之间被删掉了）。
+-	*  成功**带回生成的文本**（与同时写进叶子的那份完全相同）——调用方拿到就不必再拉一拍 /state。 */
+-	const publishWhisper = async (petId) => {
++	* 为什么内置而不是回落到 LLM：碎碎念已经**彻底不发模型请求**（零网络、零 token、零延迟、
++	* 永不因超时丢拍）。池子为空属于"用户还没填"，这时宁可说一句自带的闲话，也不能让气泡空着
++	* 或者再去请求模型——那正是旧版最难看的地方。
++	*/
++	const WHISPER_LINES_BUILTIN = [
++		"我在这儿哦。",
++		"主人，休息一下吧。",
++		"今天也辛苦了。",
++		"要不要摸摸我的头？",
++		"我在旁边陪着你。",
++		"喝口水吧。",
++		"有点想吃零食了…",
++		"我刚刚打了个盹。",
++		"你忙你的，我不吵你。",
++		"桌面上有我在，别怕。",
++		"伸个懒腰吧。",
++		"眼睛该休息一下了。",
++		"我数着时间等你。",
++		"今天过得怎么样？",
++		"有你在真好。",
++		"我偷偷给你加油。",
++		"别看太久屏幕哦。",
++		"我乖不乖？",
++		"我有点困了…",
++		"主人，我饿了。",
++		"慢慢来，不着急。",
++		"我就在右下角。",
++		"肩膀放松一点。",
++		"吃饭要按时哦。",
++		"我一直都在。",
++		"今天想被夸一句。",
++		"我什么都没想。",
++		"外面天气怎么样？",
++		"记得喝水。",
++		"我先眯一下下。",
++		"你刚才叹气了？",
++		"我在发呆，挺好。",
++		"累了就靠一会儿。",
++		"我替你看着时间。",
++		"今天也很努力了。",
++		"我想被抱一下。",
++		"别熬太晚。",
++		"我在这儿，随叫随到。",
++		"有没有想说的话？",
++		"我们慢慢来。"
++	];
++	/** 上次对这只宠物说过的那一句（进程内）：只用于本地语句池的"不连续重复" */
++	const lastWhisperLine = new Map();
++	/**
++	* 从本地语句池随机抽一句（避开紧邻的上一句）。
++	*
++	* 为什么不做纯随机：池子几百条时连着抽到同一句看着像"卡住没换"。这里只记一条、只避开上一句——
++	* 碎碎念是随口一句，不需要严格轮转（洗牌袋反而会让顺序变得可预测）。池子只有 1 条时照抽那一条。
++	*/
++	const pickWhisperLine = (petId, lines) => {
++		const last = lastWhisperLine.get(petId);
++		const pool = lines.length > 1 && last !== void 0 ? lines.filter((s) => s !== last) : lines;
++		const usable = pool.length > 0 ? pool : lines;
++		const text = usable[Math.floor(Math.random() * usable.length)];
++		lastWhisperLine.set(petId, text);
++		return text;
++	};
++	/** 返回某宠物的一句碎碎念（周期 tick 与菜单手动触发共用同一逻辑），**纯本地、永不走模型**：
++	*  句子 = 用户语句池（whisperLines）随机一条，池子为空则用内置保底语句；都不发网络请求。
++	*  成功后写进 S 的 pets.<id>.say——碎碎念 / 命令气泡 / 对话回复在前端本来就是**同一条展示链路**
++	*  （同一个 triggerWhisper、同一个气泡槽、同一批 events.whisper 动画），所以合并成同一个叶子；
++	*  "周期内不重复"由调度侧的 lastWhisperAt 保证，"紧邻不重复"由 pickWhisperLine 保证。
++	*  配图（whisperImageEnabled 开启时）：**按概率出图**（WHISPER_IMAGE_CHANCE，默认约一半），命中才从本地表情包池随机抽 1 张随文本一起写；没命中就是纯文字——文字是重点，图偶尔来一下。
++	*
++	*  失败只可能是 `unknown-pet`（目标宠物在"校验那次读"与这里之间被删掉了）。 */
++	const publishWhisper = async (petId, forcedText) => {
+ 		const cfg = readAllConfig(configPaths);
+ 		const found = findPetInstance(cfg, petId);
+ 		if (!found) return {
+@@ -4075,21 +4237,22 @@ function apply(ctx) {
+ 			reason: "unknown-pet",
+ 			message: "没有这只桌宠：" + petId
+ 		};
+-		const system = petSystemPrompt(found);
+-		const meme = found.conf.whisperImageEnabled === true ? pickMeme(readMemePool(found.conf.memes, memeDirsFor(found.entry))) : void 0;
+-		const result = await generateWhisper(ctx, system, meme, configuredModel(found.conf, "whisperModel"));
+-		if (!result.ok) {
+-			console.warn("[dsh-pet] 碎碎念生成失败 pet=" + petId + " reason=" + result.reason + (result.message ? " " + result.message : ""));
+-			return result;
+-		}
+-		state.writePet(petId, "say", result.image ? {
+-			text: result.text,
+-			image: result.image
+-		} : { text: result.text });
++		const meme = whisperMeme(found.conf, memeDirsFor(found.entry));
++		// 碎碎念**只走本地**：配了 whisperLines 就抽池子，没配就抽内置保底语句——两条路都不发模型请求，
++		// 所以"到点"到"上屏"之间没有任何等待，也不会再出现"LLM 慢了整拍被丢掉"的情况。
++		// 配图按概率出、抽中才从表情包池随机抽一张（本地文件，同样零网络）。
++		// forcedText：请求方指定说哪一句（设置页试播用），有就不抽池子、也不记"上一句"。
++		const forced = typeof forcedText === "string" ? forcedText.trim() : "";
++		const pool = strings(found.conf.whisperLines);
++		const text = forced !== "" ? forced : pickWhisperLine(petId, pool.length > 0 ? pool : WHISPER_LINES_BUILTIN);
++		state.writePet(petId, "say", meme ? {
++			text,
++			image: meme.name
++		} : { text });
+ 		return {
+ 			ok: true,
+-			text: result.text,
+-			...result.image ? { image: result.image } : {}
++			text,
++			...meme ? { image: meme.name } : {}
+ 		};
+ 	};
+ 	/** 与某只宠物对话：截取最近记忆 → 生成回复 → 写入记忆 → 把回复写进 S 的 pets.<id>.say。
+@@ -4435,7 +4598,7 @@ function apply(ctx) {
+ 				if (!clean) return {
+ 					kind: "json",
+ 					status: 400,
+-					obj: { error: "invalid pet config: expected { pets:[{name?,id,size,balanceEnabled,display,position:{corner,marginX,marginY}}] }（display 为 web/desktop/both/none 之一；可选顶层 notificationsEnabled / whisperImageEnabled / chatImageEnabled 布尔；可选宠物布尔 whisperEnabled / workStatusEnabled / fixedEnabled）" }
++					obj: { error: "invalid pet config: expected { pets:[{name?,id,size,balanceEnabled,display,position:{corner,marginX,marginY}}] }（display 为 web/desktop/both/none 之一；可选顶层 notificationsEnabled / whisperImageEnabled / chatImageEnabled 布尔、whisperLines 字符串数组（碎碎念本地语句池，一行一条；非空时不再调用模型）；可选宠物布尔 whisperEnabled / workStatusEnabled / fixedEnabled）" }
+ 				};
+ 				if (url.searchParams.get("force") !== "1" && userConfigUnparsable(configPaths)) return {
+ 					kind: "json",
+@@ -4963,10 +5126,22 @@ function apply(ctx) {
+ 				status: 405,
+ 				obj: { error: "method not allowed" }
+ 			};
++			// text 可选：设置页「让宠物说这句」把抽到的那一句原样发来试播（只是把这句写进 say、
++			// 顺便按概率配图；不参与语句池的"紧邻不重复"记账）。
++			const forcedText = url.searchParams.get("text");
++			if (forcedText !== null && forcedText.length > 200) return {
++				kind: "json",
++				status: 200,
++				obj: {
++					ok: false,
++					reason: "text-too-long",
++					message: "句子过长（限 200 字）"
++				}
++			};
+ 			try {
+ 				const who = requirePet(url.searchParams, () => readAllConfig(configPaths), { surface: true });
+ 				if (!who.ok) return who.res;
+-				const r = await publishWhisper(who.petId);
++				const r = await publishWhisper(who.petId, forcedText ?? void 0);
+ 				if (r.ok) return {
+ 					kind: "json",
+ 					status: 200,
+@@ -5838,7 +6013,8 @@ function apply(ctx) {
+ 					if (!petId) continue;
+ 					const found = findPetInstance(cfg, petId);
+ 					if (!found) continue;
+-					const schedule = automaticWhisperSchedule(ctx.standaloneAi, pet.whisperEnabled === true, whisperPeriodSec(found.conf));
++					// 碎碎念已本地化：不再询问 DSH 的 AI 策略（isReady / canWhisper），只看宠物自己开没开、周期多少
++					const schedule = automaticWhisperSchedule(pet.whisperEnabled === true, whisperPeriodSec(found.conf));
+ 					if (!schedule.enabled) continue;
+ 					const sec = schedule.periodSec;
+ 					min = Math.min(min, sec);

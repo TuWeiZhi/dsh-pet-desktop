@@ -1,0 +1,171 @@
+diff --git a/runtime/electron-helper/sprite.js b/runtime/electron-helper/sprite.js
+index a81efad..2756952 100644
+--- a/runtime/electron-helper/sprite.js
++++ b/runtime/electron-helper/sprite.js
+@@ -197,13 +197,22 @@ class PetSprite {
+     this.hit.setAttribute('aria-label', this.pet.name);
+     this.bubble = document.createElement('div');
+     this.bubble.className = 'pet-bubble';
+-    // 余额气泡可点时：点一下切换展开/收起。内容与显隐都归 renderBubble，这里只做两件事——
+-    // 就地吞掉事件（别让这次点击落到下面的本体命中层），以及交给 events.js 的 toggleBalanceDetail。
++    // 气泡可点时点一下有落点，两种意图分派（内容与显隐仍全部归 renderBubble，这里只吞事件 + 转交）：
++    //  - 余额气泡：交给 events.js 的 toggleBalanceDetail，展开/收起三窗口读数；
++    //  - 碎碎念/工作状态气泡：点一下收起（与网页端 makeWhisperBubble 的 onDismiss / dismissWorkBubble 同一语义）。
++    // 命中前提是气泡带 .is-clickable：见 renderBubble 与 syncInputRegions（窗口级穿透要那块矩形）。
+     this.bubble.addEventListener('click', (e) => {
+-      if (!this.balanceClickable()) return;
+-      e.stopPropagation();
+-      e.preventDefault();
+-      this.toggleBalanceDetail();
++      if (this.balanceClickable()) {
++        e.stopPropagation();
++        e.preventDefault();
++        this.toggleBalanceDetail();
++        return;
++      }
++      if (this.bubbleDismissible()) {
++        e.stopPropagation();
++        e.preventDefault();
++        this.dismissBubble();
++      }
+     });
+     // 悬浮提示：与气泡同处 this.el 内的绝对定位浮层，位置/翻转由 renderTip 决定，
+     // 样式走 shared 的 TOOLTIP_CSS（renderer.js 注入，与浏览器端同一份）
+@@ -1410,9 +1419,16 @@ class PetSprite {
+    * 位移分不清"拖拽跟手"和"漫游/抛掷"）。同时上报控件矩形：菜单/聊天框外的透明区域继续穿透。
+    */
+   inputBusy() {
+-    // 可点的余额气泡是第四个来源：它同样长在窗口里、同样靠窗口级 click 触发，而它悬在宠物头顶的
+-    // 余量区——那一块平时是穿透的，正需要借 busy + 控件矩形把它"圈"出来（见 syncInputRegions）。
+-    return this.dragState.active || this.menuOpen || this.chatOpen || this.balanceClickable();
++    // 可点的气泡（余额可展开 / 碎碎念与工作气泡可点击收起）是第四个来源：它同样长在窗口里、
++    // 同样靠窗口级 click 触发，而它悬在宠物头顶的余量区——那一块平时是穿透的，
++    // 正需要借 busy + 控件矩形把它"圈"出来（见 syncInputRegions）。
++    return (
++      this.dragState.active ||
++      this.menuOpen ||
++      this.chatOpen ||
++      this.balanceClickable() ||
++      this.bubbleDismissible()
++    );
+   }
+ 
+   /**
+@@ -1424,6 +1440,51 @@ class PetSprite {
+     return !!(this.bubbleOn && s && s.ok && s.shape === 'windows' && !this.balanceWrap);
+   }
+ 
++  /**
++   * 气泡当前占哪个槽（单槽，两端口径一致）：终态任务 > 碎碎念/对话 > 余额 > 非终态任务 > 无。
++   * renderBubble 渲染与点击分派都读它，避免两处优先级各写一遍走偏。
++   */
++  bubbleSlot() {
++    const workOn = !!(this.workOn && this.workText);
++    const whisperOn = !!(this.whisperOn && this.whisperView);
++    const balanceOn = !!(this.bubbleOn && this.balanceView);
++    const workTerminal = this.workState === 'success' || this.workState === 'error';
++    return workTerminal && workOn
++      ? 'work'
++      : whisperOn
++        ? 'whisper'
++        : balanceOn
++          ? 'balance'
++          : workOn
++            ? 'work'
++            : 'none';
++  }
++
++  /** 气泡此刻是否"点一下能收起"：碎碎念与工作状态两种（余额气泡走展开/收起，不算收起）。 */
++  bubbleDismissible() {
++    const slot = this.bubbleSlot();
++    return slot === 'whisper' || slot === 'work';
++  }
++
++  /**
++   * 点气泡收起它（与网页端 dismissWorkBubble / clearWhisperBubble 同一语义）：
++   * **只收起气泡本身**，不动正在播的动画——气泡与动作是两把锁，分别释放（同 events.js clearWhisper 的注释）。
++   * 运行中的工作状态气泡被点掉后，下次状态变化还会再弹（stateChanged 判定在 events.js，与本函数无关）。
++   */
++  dismissBubble() {
++    const slot = this.bubbleSlot();
++    if (slot === 'whisper') {
++      this.clearWhisper(); // 定义在 events.js，连定时器一起清
++      return;
++    }
++    if (slot === 'work') {
++      if (this.workTimer !== null) window.clearTimeout(this.workTimer);
++      this.workTimer = null;
++      this.workOn = false;
++      this.renderBubble();
++    }
++  }
++
+   /**
+    * 上报一次"要不要保持可交互"。**所有**状态变化点都走这里（幂等：值没变不发 IPC）。
+    * 与 setInteractive 的分工：setInteractive 表达"光标在不在身体上"（常规判定），
+@@ -1871,12 +1932,7 @@ class PetSprite {
+     // 配图标记交给 CSS：带图时取消 min-width（样式在 shared 的 MEME_BUBBLE_CSS，两端同一份）。
+     // 图片 URL 与视频同规则：传 BASE 前缀（桌面是 file:// 页面，必须绝对地址）
+     // 素材根同理（配图的归属与动画一致：pet/<素材根>-memes/ 独占 → 用户目录 → 包内）
+-    const workOn = !!(this.workOn && this.workText);
+-    const whisperOn = !!(this.whisperOn && this.whisperView);
+-    const balanceOn = !!(this.bubbleOn && this.balanceView);
+-    const workTerminal = this.workState === 'success' || this.workState === 'error';
+-    const slot =
+-      workTerminal && workOn ? 'work' : whisperOn ? 'whisper' : balanceOn ? 'balance' : workOn ? 'work' : 'none';
++    const slot = this.bubbleSlot();
+     // 配图两种形态二选一（host 判定层保证）：url 直接用那个完整地址，image 按素材根拼表情包路径。
+     // 样式/class 两份共用（都在 shared 的 MEME_BUBBLE_CSS），只是 src 的来源不同。
+     const whisperImg =
+@@ -1885,23 +1941,32 @@ class PetSprite {
+           ? S.createMemeImageFromUrl(this.whisperUrl)
+           : S.createMemeImage(this.whisperImage, BASE, this.assetRoot)
+         : null;
+-    this.bubble.classList.toggle(
+-      'is-whisper',
+-      // 余额「文字说明」（不可用状态）同样套用紧凑变体：字号更小、宽度下限更窄，多行说明更紧凑
+-      slot === 'whisper' || slot === 'work' || (slot === 'balance' && this.balanceWrap),
+-    );
+-    this.bubble.classList.toggle(S.MEME_BUBBLE_CLASS, !!whisperImg);
+-    // 可点/展开两个状态类：可点 → 气泡参与命中区（见 syncInputRegions）；展开 → 三窗口排版与更宽的盒
+-    const clickable = slot === 'balance' && this.balanceClickable();
+-    this.bubble.classList.toggle('is-clickable', clickable);
+-    this.bubble.classList.toggle('is-expanded', clickable && this.balanceExpanded);
++    // 先处理「没有内容」这条路径，且**绝不能在这里动尺寸类**：
++    // 气泡是 opacity 0.25s 淡出的（index.html 的 .pet-bubble），is-whisper / 配图类 /
++    // is-expanded 都会改字号与宽度上限，同一帧里摘掉它们，正在淡出的气泡会立刻跳回大号字号
++    // 与大宽度——肉眼就是「点一下收起时气泡短暂变大一下」。
++    // 所以这里只摘 is-on（触发淡出）和 is-clickable（撤销命中区），尺寸类留到下次真正渲染再改。
+     if (slot === 'none') {
+       // 三者都没有可显示的内容：隐藏（不占位，也就不会挡住任何一层）
+       this.bubble.classList.remove('is-on');
++      this.bubble.classList.remove('is-clickable');
+       window.__dshPetDebug.lastBubbleTitle = '';
+       this.syncInputBusy(); // 气泡没了 → 撤销它的控件矩形与 busy 标记（否则整窗还留着可点区域）
+       return;
+     }
++    this.bubble.classList.toggle(
++      'is-whisper',
++      // 余额「文字说明」（不可用状态）同样套用紧凑变体：字号更小、宽度下限更窄，多行说明更紧凑
++      slot === 'whisper' || slot === 'work' || (slot === 'balance' && this.balanceWrap),
++    );
++    this.bubble.classList.toggle(S.MEME_BUBBLE_CLASS, !!whisperImg);
++    // 可点/展开两个状态类：可点 → 气泡参与命中区（见 syncInputRegions）；展开 → 三窗口排版与更宽的盒。
++    // 可点有两种落点：余额气泡点开三窗口读数；碎碎念/工作气泡点一下收起。样式在 index.html：
++    // .pet-bubble 默认 pointer-events:none，只有 .is-clickable 才开命中。
++    const balanceClickable = slot === 'balance' && this.balanceClickable();
++    const dismissible = slot === 'whisper' || slot === 'work';
++    this.bubble.classList.toggle('is-clickable', balanceClickable || dismissible);
++    this.bubble.classList.toggle('is-expanded', balanceClickable && this.balanceExpanded);
+     this.bubble.innerHTML = '';
+     if (slot === 'work') {
+       const line = document.createElement('div');
+@@ -1918,7 +1983,7 @@ class PetSprite {
+     } else {
+       // 展开态的行在这里现算：renderBubble 是只读渲染路径，不缓存（余额每轮都在变，缓存反而要同步失效）
+       const rows =
+-        clickable && this.balanceExpanded && this.balanceState
++        balanceClickable && this.balanceExpanded && this.balanceState
+           ? S.balanceDetailView(this.balanceState)
+           : this.balanceView;
+       const hasTier = rows.some((r) => r.role === 'tier');

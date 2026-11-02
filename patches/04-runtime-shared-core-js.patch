@@ -1,0 +1,20 @@
+diff --git a/runtime/electron-helper/shared-core.js b/runtime/electron-helper/shared-core.js
+index 091d6dc..21f543c 100644
+--- a/runtime/electron-helper/shared-core.js
++++ b/runtime/electron-helper/shared-core.js
+@@ -193,9 +193,13 @@ const anchorPixel = (o) => {
+ 		width: o.W,
+ 		height: o.H
+ 	};
+-	const left = a.x + o.marginX;
++	// 画布左右各有约 31% 的透明留白（角色只占 HIT_BOX 那 240/640 的中间部分，左右对称），
++	// 不扣掉它，marginX=0 时角色本体也离屏幕边缘差半个身位。语义与浏览器 overlay 的
++	// sideAllow 一致：**身体**贴边，画布允许出去。缺省 0 → 行为与改前完全相同。
++	const side = o.sideAllow ?? 0;
++	const left = a.x + o.marginX - side;
+ 	const top = a.y + o.marginY;
+-	const right = a.x + a.width - o.size - o.marginX;
++	const right = a.x + a.width - o.size - o.marginX + side;
+ 	const bottom = a.y + a.height - height - o.marginY;
+ 	switch (o.corner) {
+ 		case "top-left": return {

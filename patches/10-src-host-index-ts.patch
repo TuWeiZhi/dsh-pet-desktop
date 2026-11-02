@@ -1,0 +1,20 @@
+diff --git a/src/host/index.ts b/src/host/index.ts
+index 13c86dc..823361f 100644
+--- a/src/host/index.ts
++++ b/src/host/index.ts
+@@ -122,6 +122,7 @@ import { parsePlaybackPath, parseWaitQuery, PlaybackStore } from './playback';
+ import { PoseStore, normalizePoseInput } from './pose';
+ import { SURFACE_TEXT, displayCovers, normalizeSurface, type Surface } from './surface';
+ import {
++  backupUserConfig,
+   findPetInstance,
+   flattenPetList,
+   ID_FORBIDDEN,
+@@ -1206,6 +1207,7 @@ export function apply(ctx: any): void {
+             };
+           }
+           await mkdir(userRoot, { recursive: true });
++          backupUserConfig(configPaths); // 覆盖前留档：写坏了还能找回用户原来的配置
+           await writeFile(userConfigPath, JSON.stringify(clean, null, 2), 'utf8');
+           void syncDesktop(); // display/size 等可能变化：重解析桌面宠物并重启 Helper（异步，不阻塞保存响应）
+           // 响应体 = 保存后的**成品聚合**（与 GET /config 同一份，字段已填满）：

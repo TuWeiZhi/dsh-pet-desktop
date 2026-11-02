@@ -1,0 +1,33 @@
+# ============================================================================
+# @tuweizhi/dsh-pet 的 bundle patch —— 把宠物插件挂进 DSH 配置树
+# ============================================================================
+#
+# 【这是什么】
+#   这是本 fork 的"挂载声明"。DSH 启动时按 bundle 层栈把各个插件的
+#   patch 叠起来组成配置树。本文件就是这一层的内容。
+#
+# 【工作原理】
+#   - insert：往配置树里添加新的插件行（entry）
+#   - 每个 entry 有 id（行标识，patch 覆盖时按它定位）和 name（插件模块）
+#   - 插件行那一行（"id: 值"）绝不能写行尾注释：商城预检（check-plugin-submission.mjs）
+#     用正则抓该行的值并要求其后直接换行，行尾注释会让它抓不到 entry ID，
+#     整份提交被判 SUBMISSION_ENTRY_MISSING
+#   - name: '@tuweizhi/dsh-pet' 会解析本包入口 lib/index.js（宿主半侧）
+#   - 因为 package.json 声明了 dsh.client，DSH 的模块系统同时会把
+#     这个包扫描为"浏览器插件"，提供 /plugins/@tuweizhi/dsh-pet/client.js 给页面
+#
+# 【为什么 id 仍是 dsh-pet（不带作用域）】
+#   - 本 fork 是上游 PC2005-cloud/dsh-pet 的直接替代品：插件内部的路由前缀
+#     /dsh-pet-7340、宿主标识 PET_CALL_IDENTITY、用户数据目录
+#     $DSH_HOME/dsh-pet（main-config.jsonc / memory.json）全部沿用上游常量，
+#     换包后现有宠物状态与配置原样可用
+#   - entry id 沿用上游，替换安装时对齐的是同一行，配置树里不会多出一行重复挂载
+#   - 与同作者的 @tuweizhi/dsh-translator 保持同样写法（id 裸名 + name 作用域名）
+#   - 注意：若将来要提交到 DSH STORE，那边要求 entry id 与包名逐字一致，
+#     届时需按 @tuweizhi/dsh-pet 改写，并同步检查商城预检
+#
+# ============================================================================
+
+- insert:
+    - id: dsh-pet
+      name: '@tuweizhi/dsh-pet'   # 模块名：解析到本包 lib/index.js

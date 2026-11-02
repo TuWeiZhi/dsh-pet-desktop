@@ -1,0 +1,14 @@
+diff --git a/runtime/electron-helper/sprite.js b/runtime/electron-helper/sprite.js
+index 730af12..a81efad 100644
+--- a/runtime/electron-helper/sprite.js
++++ b/runtime/electron-helper/sprite.js
+@@ -427,6 +427,9 @@ class PetSprite {
+           this.pet.position.marginY -
+           (this.pet.position.corner.startsWith('top-') ? this.size * CONFIG.topInsetRatio : 0),
+         size: this.size,
++        // 画布左右各留 ~31% 透明边：贴角时按 sideAllow 反向补偿，让**角色本体**贴边
++        // （HIT_BOX 左右留白等宽，一个值够用）
++        sideAllow: this.sideAllow,
+         W,
+         H,
+         area: PRIMARY_AREA || undefined,

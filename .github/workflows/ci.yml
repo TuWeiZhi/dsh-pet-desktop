@@ -1,0 +1,34 @@
+# 日常 CI（push / PR）：只跑不需要联网、不需要安装依赖的体检。
+#
+# 体检项在 tools/verify-desktop.mjs 里，与发版前本地跑的是同一个脚本：
+#   package.json 清单 / electron-builder 配置 / 入口与运行时文件是否齐 /
+#   node --check 七个入口文件 / 设置页三段片段与 lib/standalone.js 是否同步 /
+#   有没有把本机路径、令牌带进仓库。
+#
+# 不在这里跑 electron-builder：构建要下载 100+ MB 的 Electron 与 NSIS，
+# 而且打出来的包必须在真机上验过才有意义。构建见 release.yml（tag 触发）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      # lib/ 是提交进仓库的产物，自检脚本只用 node 内置模块，不需要 npm ci
+      - name: Verify desktop package
+        run: node tools/verify-desktop.mjs

@@ -1,0 +1,36 @@
+# ---- 依赖与安装产物 ----
+node_modules/
+pnpm-lock.yaml
+yarn.lock
+
+# ---- 打包/构建临时产物（npm 侧另有 package.json files 白名单兜底） ----
+*.tgz
+*.tar.gz
+_patchbuild/
+_upstream/
+
+# ---- 桌面版：electron-builder 产物与本地构建日志（体积大，走 Release 分发） ----
+dist/
+_build.log
+*.blockmap
+
+# ---- 用户数据：绝不入库（插件运行时会写进 $DSH_HOME/dsh-pet/） ----
+main-config.jsonc
+memory.json
+*.log
+logs/
+
+# ---- 本机/编辑器杂项 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.bak
+*.orig
+*.rej
+npm-debug.log*
+
+# 临时文件
+*.tmp

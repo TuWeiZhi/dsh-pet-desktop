@@ -1,0 +1,176 @@
+diff --git a/runtime/electron-helper/shared-core.js b/runtime/electron-helper/shared-core.js
+index 21f543c..8f45746 100644
+--- a/runtime/electron-helper/shared-core.js
++++ b/runtime/electron-helper/shared-core.js
+@@ -622,6 +622,19 @@ function whisperBubbleView(state) {
+ 		text: msg
+ 	}];
+ }
++/** 碎碎念气泡的停留毫秒（设置页「停留秒数」）。
++ *  桌面端此前把时长写死成 BUBBLE_DURATION_MS(10s)，设置页填多少都不生效——与浏览器端
++ *  （client 的 whisperDwellMs 读 cfg.whisperBubbleSec）行为不一致，这里补齐同一口径：
++ *  **0 是合法值**＝「不自动消失」（留到下一句碎碎念，或被别的气泡/清空顶掉），非法/缺省回落 10s。 */
++function whisperDwellMsOf(sec) {
++	const n = Number(sec);
++	return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : 10000;
++}
++/** 碎碎念文字倍率（设置页「文字倍率」，相对气泡正文字号）：缺省/非法回落 1.35（与浏览器端一致） */
++function whisperTextScaleOf(scale) {
++	const n = Number(scale);
++	return Number.isFinite(n) && n > 0 ? n : 1.35;
++}
+ function memeImageUrl(name, base = "/dsh-pet-7340", assetRoot = "") {
+ 	const root = String(assetRoot ?? "").trim();
+ 	const prefix = root ? "/pic/memes/" + encodeURIComponent(root) : "/pic/memes";
+@@ -761,13 +774,21 @@ const BUBBLE_METRICS = {
+ 	imgMaxRatio: 1
+ };
+ function bubbleMaxHeightPx(font, size) {
+-	const f = resolveFontPx(font, size).bubble;
++	return bubbleMaxHeightOfPx(resolveFontPx(font, size).bubble);
++}
++/** 同上，但直接收**已算好的字号 px**：碎碎念的文字倍率会把气泡字号放大到超过正文字号，
++ *  调用方（桌面 sprite 算窗口上边距）必须按"放大后的最大字号"预留空间，否则气泡顶端被窗口切掉。 */
++function bubbleMaxHeightOfPx(f) {
+ 	const m = BUBBLE_METRICS;
+ 	return m.padY * 2 * f + m.lineHeight * f + m.lineHeight * m.subScale * f + m.imgWidth * m.imgMaxRatio * f + m.imgMargin * f;
+ }
+ function bubbleTopMarginPx(font, size) {
++	return bubbleTopMarginOfPx(resolveFontPx(font, size).bubble, size);
++}
++/** 同上，但直接收**已算好的字号 px**（理由见 bubbleMaxHeightOfPx） */
++function bubbleTopMarginOfPx(f, size) {
+ 	const overlap = (Number(size) || 0) * BUBBLE_OVERLAP_RATIO;
+-	return Math.max(0, Math.ceil(bubbleMaxHeightPx(font, size) - overlap));
++	return Math.max(0, Math.ceil(bubbleMaxHeightOfPx(f) - overlap));
+ }
+ 
+ //#endregion
+@@ -2051,7 +2072,9 @@ exports.balancePercent = balancePercent
+ exports.bodyPixelBox = bodyPixelBox
+ exports.boundingRect = boundingRect
+ exports.bubbleMaxHeightPx = bubbleMaxHeightPx
++exports.bubbleMaxHeightOfPx = bubbleMaxHeightOfPx
+ exports.bubbleTopMarginPx = bubbleTopMarginPx
++exports.bubbleTopMarginOfPx = bubbleTopMarginOfPx
+ exports.buildMenuTree = buildMenuTree
+ exports.buildMoreBranch = buildMoreBranch
+ exports.clampPointInRect = clampPointInRect
+@@ -2137,6 +2160,8 @@ exports.trimTrail = trimTrail
+ exports.truncate = truncate
+ exports.urgentWindow = urgentWindow
+ exports.whisperBubbleView = whisperBubbleView
++exports.whisperDwellMsOf = whisperDwellMsOf
++exports.whisperTextScaleOf = whisperTextScaleOf
+ exports.windowsHandler = windowsHandler
+ return exports;
+ })({});
+\ No newline at end of file
+diff --git a/runtime/electron-helper/renderer.js b/runtime/electron-helper/renderer.js
+index 9cde59d..2070813 100644
+--- a/runtime/electron-helper/renderer.js
++++ b/runtime/electron-helper/renderer.js
+@@ -66,6 +66,11 @@ async function loadConfig() {
+     // 字体（全局一份，合并器已填内置默认）：字体族在此取一次、注入全局变量；字号由每只宠物
+     // 按自己的尺寸算（见 PetSprite 注入的 --dsh-pet-font-bubble / --dsh-pet-font-tip）
+     font: (merged && merged.main && merged.main.font) || S.DEFAULT_FONT,
++    // 碎碎念气泡的展示参数（设置页「语句池」卡片里那两格）：停留秒数 + 文字倍率。
++    // 与 font 同一处境——用户层全局一份、合并器已填默认。桌面端此前**完全没读**这两个字段，
++    // 于是设置页填了也不生效（停留永远写死 10s、文字永远 1×）。
++    whisperBubbleSec: merged && merged.main ? merged.main.whisperBubbleSec : void 0,
++    whisperTextScale: merged && merged.main ? merged.main.whisperTextScale : void 0,
+   };
+ }
+ 
+diff --git a/runtime/electron-helper/sprite.js b/runtime/electron-helper/sprite.js
+index 2756952..83c72f2 100644
+--- a/runtime/electron-helper/sprite.js
++++ b/runtime/electron-helper/sprite.js
+@@ -13,6 +13,10 @@ const OPEN_SHORTCUT_HINT = /Mac/i.test(navigator.platform || navigator.userAgent
+ /** 本次点击是否按住了「呼出 DSH」的修饰键（Ctrl / Cmd） */
+ const isOpenShortcut = (e) => !!(e && (e.ctrlKey || e.metaKey));
+ 
++// 碎碎念气泡的字号系数（相对气泡正文）：index.html 的 .pet-bubble.is-whisper 用的同一个值，
++// 这里重复一份是为了算窗口上边距（要按"放大后的字号"预留，否则气泡顶端会被窗口切掉）。
++const WHISPER_FONT_RATIO = 0.7473;
++
+ // ---------- 单只宠物（行为与浏览器 PetCard 一致；纯逻辑来自 src/shared） ----------
+ class PetSprite {
+   constructor(pet) {
+@@ -49,7 +53,13 @@ class PetSprite {
+     // 注意：余量自此**不再四边相等**，主进程不能再按「窗口宽/4」反推命中区，故 setBounds 一并上报余量。
+     const m = this.size * WINDOW_MARGIN_RATIO;
+     const fontConf = pet.font || config.font || S.DEFAULT_FONT;
+-    this.margin = { t: Math.max(m, S.bubbleTopMarginPx(fontConf, this.size)), r: m, b: m, l: m };
++    // 碎碎念的文字倍率（设置页可配，最多 3×）会把气泡字号放大到超过正文：上边距必须按**放大后**
++    // 的最大字号算，否则气泡顶端会被窗口上边缘切掉（余量是透明的，加高没有副作用）。
++    this.whisperScale = S.whisperTextScaleOf(config.whisperTextScale);
++    this.whisperDwellMs = S.whisperDwellMsOf(config.whisperBubbleSec);
++    const bubbleFontPx = S.resolveFontPx(fontConf, this.size).bubble;
++    const whisperFontPx = bubbleFontPx * WHISPER_FONT_RATIO * this.whisperScale;
++    this.margin = { t: Math.max(m, S.bubbleTopMarginOfPx(Math.max(bubbleFontPx, whisperFontPx), this.size)), r: m, b: m, l: m };
+     window.__dshPetDebug.winMargin = this.margin;
+     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
+     this.pos = { x: 0, y: 0 };
+@@ -174,6 +184,9 @@ class PetSprite {
+     const fontPx = S.resolveFontPx(this.font, this.size);
+     this.el.style.setProperty('--dsh-pet-font-bubble', fontPx.bubble + 'px');
+     this.el.style.setProperty('--dsh-pet-font-tip', fontPx.tip + 'px');
++    // 碎碎念文字倍率：.pet-bubble.is-whisper 读这个变量把 --f 放大（盒子/内边距/圆角一起放大），
++    // 与浏览器端 --dsh-pet-whisper-scale 同一套变量名与语义
++    this.el.style.setProperty('--dsh-pet-whisper-scale', String(this.whisperScale));
+     const stage = document.createElement('div');
+     stage.className = 'pet-stage';
+     stage.style.transform = 'translateY(' + this.bottomPad + 'px)';
+diff --git a/runtime/electron-helper/events.js b/runtime/electron-helper/events.js
+index b8ce497..0791263 100644
+--- a/runtime/electron-helper/events.js
++++ b/runtime/electron-helper/events.js
+@@ -197,11 +197,20 @@ PetSprite.prototype.showWhisper = function showWhisper(text, image, url, duratio
+   this.whisperUrl = typeof url === 'string' ? url : '';
+   this.renderBubble();
+   // 气泡定时消失（与动画解耦，与余额同一语义；重复触发先清旧定时器）
+-  if (this.whisperTimer !== null) window.clearTimeout(this.whisperTimer);
+-  this.whisperTimer = window.setTimeout(() => {
+-    this.whisperOn = false;
+-    this.renderBubble();
+-  }, duration ?? BUBBLE_DURATION_MS);
++  // 时长优先级：显式 duration（POST /broadcast 指定）> 设置页「停留秒数」> 内置 10s 兜底。
++  // 0 = 「不自动消失」：只清旧定时器、不挂新的——留到下一句碎碎念，或被别的气泡/清空顶掉
++  //（与浏览器端同一语义，那边也是 if (dwellMs > 0) 才挂定时器）。
++  if (this.whisperTimer !== null) {
++    window.clearTimeout(this.whisperTimer);
++    this.whisperTimer = null;
++  }
++  const dwellMs = duration ?? this.whisperDwellMs;
++  if (dwellMs > 0) {
++    this.whisperTimer = window.setTimeout(() => {
++      this.whisperOn = false;
++      this.renderBubble();
++    }, dwellMs);
++  }
+ };
+ 
+ // 余额展示（气泡 + 档位动画）：周期轮询与菜单点播共用同一展示路径，视觉/行为严格一致。
+diff --git a/runtime/electron-helper/index.html b/runtime/electron-helper/index.html
+index fda3076..c84c52d 100644
+--- a/runtime/electron-helper/index.html
++++ b/runtime/electron-helper/index.html
+@@ -131,10 +131,17 @@
+       /* 碎碎念变体：与浏览器 overlay 一致 —— 字号缩到余额气泡的 0.75、宽度下限更窄（0.10 → 2.1978），
+          上限与余额气泡相同；宽度取宽/折行规则继承 .pet-bubble，高度随行数自然增长 */
+       .pet-bubble.is-whisper {
++        /* 文字倍率（设置页可配）：直接改 --f 这个锚点——字号/内边距/圆角/宽度上限一起放大，
++           与浏览器端 .dsh-pet-bubble.dsh-pet-whisper 同一套写法（那边也是改 --f）。
++           变量缺省 1 表示"不放大"，保证没有配置时与改造前完全一致。 */
++        --f: calc(var(--f0) * var(--dsh-pet-whisper-scale, 1));
+         font-size: calc(var(--f) * 0.7473);
+         min-width: calc(var(--f) * 2.1978);
+         max-width: min(calc(var(--f) * 10.989), 100%);
+       }
++      /* 配图不跟着文字倍率放大（设置页文案：只放大文字，配图尺寸不跟着变）：
++         MEME 配图的 --m 锚在放大后的 --f 上，这里把它拉回收起态字号 --f0 */
++      .pet-bubble.is-whisper .pet-bub-img { --m: var(--f0); }
+       .pet-bub-row {
+         display: flex;
+         justify-content: space-between;

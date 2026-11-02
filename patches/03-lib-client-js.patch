@@ -1,0 +1,799 @@
+diff --git a/lib/client.js b/lib/client.js
+index 08da286..06d5bf5 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -114,6 +114,9 @@ function flattenConfigPets(merged) {
+ 			workStatusTexts: conf.workStatusTexts,
+ 			whisperModel: conf.whisperModel,
+ 			chatModel: conf.chatModel,
++			// 碎碎念气泡的展示参数（停留秒数 / 文字倍率）：随条目带下来，气泡渲染时直接用
++			whisperBubbleSec: conf.whisperBubbleSec,
++			whisperTextScale: conf.whisperTextScale,
+ 			assetRoot: entry,
+ 			extra: entry !== "main"
+ 		});
+@@ -710,7 +713,8 @@ function whisperBubbleView(state) {
+ 		role: "label",
+ 		text: state.text
+ 	}];
+-	const msg = state.reason === "provider-missing" ? "当前对话未配置模型，碎碎念不可用" : "碎碎念生成失败" + (state.message ? "：" + state.message : "");
++	// 碎碎念已全部本地化（本地语句池），不存在"调模型失败"这种事；走到这里只会是没抽到句子等异常
++	const msg = state.reason === "provider-missing" ? "碎碎念是本地语句池，不需要模型" : "碎碎念未播报" + (state.message ? "：" + state.message : "");
+ 	return [{
+ 		role: "label",
+ 		text: msg
+@@ -760,7 +764,11 @@ const bubbleCss = [
+ 	".dsh-pet-bubble{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% - var(--dsh-pet-size)*0.108);width:max-content;min-width:calc(var(--f)*5.7143);max-width:min(calc(var(--f)*16),100%);box-sizing:content-box;padding:calc(var(--f)*0.4835) calc(var(--f)*0.6593);border-radius:calc(var(--f)*0.7692);background:rgba(255,255,255,.92);--f0:var(--dsh-pet-font-bubble,calc(var(--dsh-pet-size)*0.0455));--f:var(--f0);color:#2b2b2b;font-family:var(--dsh-pet-font-family,\"ShangshouSoftCandy\",\"Yuanti SC\",\"YouYuan\",\"幼圆\",\"Comic Sans MS\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif);font-size:var(--f);line-height:1.6;z-index:3;pointer-events:none;box-shadow:0 calc(var(--f)*0.1978) calc(var(--f)*0.7692) rgba(0,0,0,.14),0 1px 3px rgba(0,0,0,.08);backdrop-filter:blur(6px);opacity:0;transition:opacity .25s ease;white-space:normal;overflow-wrap:break-word}",
+ 	".dsh-pet-bubble::after{content:\"\";position:absolute;left:50%;bottom:calc(var(--f)*-0.3736);transform:translateX(-50%);border:calc(var(--f)*0.3736) solid transparent;border-top-color:rgba(255,255,255,.92);border-bottom:none}",
+ 	".dsh-pet-bubble.is-on{opacity:1}",
+-	".dsh-pet-bubble.dsh-pet-whisper{font-size:calc(var(--f)*0.7473);min-width:calc(var(--f)*2.1978);max-width:min(calc(var(--f)*10.989),100%)}",
++	// 碎碎念是「重点展示」：字号按 `--dsh-pet-whisper-scale`（设置页「文字倍率」，默认 1.35）放大——
++	// 直接改 --f，气泡盒子的内边距/圆角/尾巴/宽上下限全都跟着放大；字重 600、颜色加深，短句一眼看清。
++	// 配图只是配角（下一行单独把图片尺寸压在原来的量级，不让它跟着字号一起涨）。
++	".dsh-pet-bubble.dsh-pet-whisper{--f:calc(var(--f0)*var(--dsh-pet-whisper-scale,1.35));font-weight:600;color:#1f1f1f;min-width:calc(var(--f)*2.1978);max-width:min(calc(var(--f)*10.989),100%)}",
++	".dsh-pet-bubble.dsh-pet-whisper .pet-bub-img{--m:calc(var(--f0)*0.9)}",
+ 	".dsh-pet-bubble .pet-bub-title{font-size:calc(var(--f)*0.7692);color:rgba(43,43,43,.6);margin-bottom:calc(var(--f)*0.1978)}",
+ 	".dsh-pet-bubble .pet-bub-row{display:flex;justify-content:space-between;gap:calc(var(--f)*0.6593);flex-wrap:wrap}",
+ 	".dsh-pet-bubble .pet-bub-row>span{white-space:nowrap}",
+@@ -892,7 +900,7 @@ function makeWhisperBubble(rt) {
+ 	const { h } = rt;
+ 	injectBubbleCss();
+ 	injectMemeBubbleCss();
+-	return function WhisperBubble({ text, image, url, assetRoot, on }) {
++	return function WhisperBubble({ text, image, url, assetRoot, on, onDismiss, dismissTip }) {
+ 		const rows = whisperBubbleView({
+ 			ok: true,
+ 			text,
+@@ -901,8 +909,17 @@ function makeWhisperBubble(rt) {
+ 		const key = String(image ?? "").trim();
+ 		const href = String(url ?? "").trim();
+ 		const src = href || (key ? memeImageUrl(key, "/dsh-pet-7340", assetRoot) : "");
++		// 可点击收起：只在真的有落点（onDismiss）时才放开 pointer-events（.is-clickable），
++		// 否则气泡保持穿透，免得挡住宠物本体的拖拽/点击热区
+ 		return h("div", {
+-			className: "dsh-pet-bubble dsh-pet-whisper" + (src ? " " + MEME_BUBBLE_CLASS : "") + (on ? " is-on" : ""),
++			className: "dsh-pet-bubble dsh-pet-whisper" + (src ? " " + MEME_BUBBLE_CLASS : "") + (on ? " is-on" : "") + (onDismiss ? " is-clickable" : ""),
++			title: onDismiss && dismissTip ? dismissTip : void 0,
++			"aria-hidden": on ? void 0 : "true",
++			onClick: onDismiss ? (e) => {
++				e.stopPropagation();
++				e.preventDefault();
++				onDismiss();
++			} : void 0,
+ 			children: src ? [h("img", {
+ 				key: "img",
+ 				className: MEME_IMG_CLASS,
+@@ -1690,10 +1707,13 @@ const squashScale = (u, squash = SQ_SQUASH) => {
+ };
+ const throwBounds = (o) => {
+ 	const h = o.size * 9 / 16;
++	// 左右透明留白允许出屏的量：HIT_BOX 两侧对称为同一值，留 sideAllowR 是为了以后换画布也能对准
++	const sideL = o.sideAllow ?? 0;
++	const sideR = o.sideAllowR ?? sideL;
+ 	return {
+-		minX: -o.sideAllow,
++		minX: -sideL,
+ 		minY: 0,
+-		maxX: o.W - o.size + o.sideAllow,
++		maxX: o.W - o.size + sideR,
+ 		maxY: o.H - h
+ 	};
+ };
+@@ -2200,10 +2220,36 @@ const zh = {
+ 	personaLabel: "人设（可选）",
+ 	personaHint: "只影响这只宠物。留空 = 跟随所属条目的人设——输入框里的灰色文字就是那份内容。实际发给模型的 system = 这段 + 自动追加的「你的名字是“<名字>”」+ 当前时间背景，所以别在这里再写名字和日期。",
+ 	personaCount: "{n} 字",
++	whisperPoolTitle: "碎碎念：语句池与气泡",
++	whisperPoolHint: "一行一条。碎碎念**只从本地抽句子，永不调用模型**：到点随机抽一句（会避开紧邻的上一句），零请求、零 token、零延迟，也不会因为超时被丢掉。留空就用插件内置的几十句保底——同样是本地，照样不联网。",
++	whisperPoolPlaceholder: "一行一条，例如：\n主人今天也要加油哦～\n我在这儿陪着你。\n有点想吃薯片了…",
++	whisperPoolCount: "共 {n} 条",
++	whisperPoolSample: "随机试一条",
++	whisperPoolSay: "让宠物说这句",
++	whisperPoolSayOk: "已让桌宠说这句（看屏幕上的气泡）",
++	whisperPoolSayFail: "试播失败",
++	whisperPoolSampleEmpty: "池子是空的，先去上面写几句～",
++	autoTitle: "自动行为间隔",
++	autoHint: "宠物自己动起来的节奏：碎碎念多久冒一句、随机动作之间歇多久。单位秒，改完点保存即时生效（对所有宠物生效）。",
++	whisperSecLabel: "碎碎念间隔（秒）",
++	whisperSecHint: "每隔这么久从本地语句池抽一句（不调模型、零延迟）。最小 60 秒——填更小也按 60 跑，所以干脆不让你填。",
++	actionSecLabel: "动作间隔（秒）",
++	actionSecHint: "每个随机动作播完后先播待机、歇这么久，再抽下一个动作。0 = 不歇，动作一播完立刻接下一个（旧行为）。填 20 就是「动一下、歇 20 秒」。",
++	invalidWhisperSec: "碎碎念间隔必须是 ≥ 60 的秒数。",
++	invalidActionSec: "动作间隔必须是 ≥ 0 的数字（0 = 不歇）。",
++	whisperDwellLabel: "气泡停留（秒）",
++	whisperDwellHint: "碎碎念气泡显示多久自动消失。0 = 不自动消失（留到下一句碎碎念，或被别的气泡/手动清掉顶替）。范围 0–600，默认 10 秒。",
++	whisperScaleLabel: "文字倍率",
++	whisperScaleHint: "碎碎念文字相对气泡正文的大小倍率：1.35 = 大 35%（默认，一眼看出是重点），1 = 和正文一样大，2 = 两倍。范围 0.8–3；只放大文字，配图尺寸不跟着变。",
++	invalidWhisperDwell: "气泡停留必须是 0–600 之间的秒数（0 = 不自动消失）。",
++	invalidWhisperScale: "文字倍率必须是 0.8–3 之间的数字。",
++	// 碎碎念/工作状态气泡的「点一下收起」提示（气泡 title，鼠标悬停可见）
++	bubbleDismissTip: "点一下收起",
++	invalidWhisperPool: "请检查语句池：每行一条、不能有空白行以外的空内容，单行不超过 2000 字。",
+ 	balanceEnabled: "余额功能",
+ 	balanceEnabledHint: "启用后该宠物触发余额动画并显示余额气泡。",
+ 	whisperEnabled: "碎碎念",
+-	whisperEnabledHint: "启用后该宠物按周期用 AI 生成一句话并播碎碎念动画（人设见下方「人设」框，留空跟随条目）。",
++	whisperEnabledHint: "启用后该宠物按周期从本地语句池随机抽一句话并播碎碎念动画（不调用任何模型，零请求零延迟）。语句池见下方「碎碎念语句池」，留空用内置保底。",
+ 	workStatusEnabled: "工作状态联动",
+ 	workStatusEnabledHint: "启用后该宠物跟随 DSH 工作状态：思考/工作中/等待确认/完成/出错时自动切对应动画并弹气泡（动画池在配置顶层，仅监听不调用模型）。",
+ 	fixedEnabled: "宠物固定",
+@@ -2245,7 +2291,7 @@ const zh = {
+ 	notifyToggle: "系统通知",
+ 	notifyToggleHint: "对话完成 / 生成失败 / 权限申请 / 用户选择，在窗口失焦时弹出系统级通知（桌面右下角）。",
+ 	whisperImageToggle: "碎碎念配图",
+-	whisperImageToggleHint: "碎碎念时从表情包池随机抽一张，连同那句话一起显示（图片映射在配置文件顶层 memes）。token：碎碎念本来就每次生成都要调一次模型，配图只是把抽中那张的名称+描述（约 100 字符 / ≈60 token）加进同一次请求，增量可忽略。",
++	whisperImageToggleHint: "碎碎念「偶尔」带一张图：不是每句都有，约一半概率从表情包池随机抽一张（图片映射在配置文件顶层 memes）；没抽中就是纯文字。token：0——碎碎念已全部本地化，图片与名称/描述都是本地文件，不发任何请求。",
+ 	chatImageToggle: "对话配图",
+ 	chatImageToggleHint: "对话时由 AI 按当前语境从表情包池挑一张配图（可不挑；图片映射在配置文件顶层 memes）。token：每条消息都要把整张清单附进请求，当前约 1.1k 字符（≈650 token，约碎碎念配图的 11 倍），并随图片数量线性增长；关掉则一个字符都不附。",
+ 	confineToggle: "锁定在当前屏幕",
+@@ -2282,7 +2328,7 @@ const zh = {
+ 	"font.comic": "漫画体",
+ 	"font.system": "系统默认",
+ 	modelTitle: "AI 模型与对话上下文",
+-	modelHint: "碎碎念与对话各自用哪个模型，以及对话每次带多少历史进上下文。选「跟随当前对话」= 用你当前对话正在用的那个模型（默认）。全局默认：对所有宠物生效，pet pack 可在自己种类文件里单独覆盖。选项与 DSH 的模型选择器同源，由宿主实时提供。",
++	modelHint: "对话用哪个模型，以及对话每次带多少历史进上下文。选「跟随当前对话」= 用你当前对话正在用的那个模型（默认）。碎碎念已全部本地化、不再调用任何模型，所以这里只剩对话模型可配。全局默认：对所有宠物生效，pet pack 可在自己种类文件里单独覆盖。选项与 DSH 的模型选择器同源，由宿主实时提供。",
+ 	modelFollow: "跟随当前对话",
+ 	modelSearch: "搜索模型…",
+ 	modelEmpty: "没有匹配的模型。",
+@@ -2352,10 +2398,36 @@ const en = {
+ 	personaLabel: "Persona (optional)",
+ 	personaHint: "Applies to this pet only. Leave empty to follow the entry persona — the grey text inside the box is exactly that. The system prompt actually sent = this text + an appended 「your name is \"<name>\"」 line + the current time context, so do not repeat the name or the date here.",
+ 	personaCount: "{n} chars",
++	whisperPoolTitle: "Whisper: line pool & bubble",
++	whisperPoolHint: "One line per row. Whisper **only samples locally and never calls a model**: a random line is picked on every tick (never the same one twice in a row) — no request, no tokens, no waiting, and it can never be dropped by a timeout. Empty = the built-in fallback lines are used, also local.",
++	whisperPoolPlaceholder: "One line per row, e.g.:\nYou can do it today too~\nI'm right here with you.\nI could really go for some chips…",
++	whisperPoolCount: "{n} lines",
++	whisperPoolSample: "Roll one",
++	whisperPoolSay: "Say it on the pet",
++	whisperPoolSayOk: "Sent — watch the bubble on screen",
++	whisperPoolSayFail: "Preview failed",
++	whisperPoolSampleEmpty: "The pool is empty — write a few lines above first.",
++	autoTitle: "Auto behaviour intervals",
++	autoHint: "Pacing of what the pet does on its own: how often it whispers, and how long it rests between random actions. Seconds; Save applies immediately (global, all pets).",
++	whisperSecLabel: "Whisper interval (s)",
++	whisperSecHint: "Sample a line from the local pool this often (no model, no latency). Minimum 60 s — anything smaller runs at 60 anyway, so it is rejected here.",
++	actionSecLabel: "Action interval (s)",
++	actionSecHint: "After each random action the pet idles for this long before rolling the next one. 0 = no rest, chain straight to the next action (old behaviour). Set 20 for \"act, then chill for 20 s\".",
++	invalidWhisperSec: "Whisper interval must be a number of seconds ≥ 60.",
++	invalidActionSec: "Action interval must be a number ≥ 0 (0 = no rest).",
++	whisperDwellLabel: "Bubble dwell (s)",
++	whisperDwellHint: "How long a whisper bubble stays before fading out. 0 = never auto-hide (it stays until the next whisper or until another bubble / a manual clear replaces it). Range 0–600, default 10 s.",
++	whisperScaleLabel: "Text scale",
++	whisperScaleHint: "Whisper text size relative to the bubble body text: 1.35 = 35% larger (default, clearly the highlight), 1 = same as body text, 2 = twice as large. Range 0.8–3; only the text scales — the meme keeps its own size.",
++	invalidWhisperDwell: "Bubble dwell must be a number of seconds between 0 and 600 (0 = never auto-hide).",
++	invalidWhisperScale: "Text scale must be a number between 0.8 and 3.",
++	// tooltip for clicking a whisper / work-status bubble to dismiss it
++	bubbleDismissTip: "Click to dismiss",
++	invalidWhisperPool: "Check the pool: one line per row, no empty entries, each line at most 2000 characters.",
+ 	balanceEnabled: "Balance",
+ 	balanceEnabledHint: "When enabled, this pet plays balance animations and shows the balance bubble.",
+ 	whisperEnabled: "Whisper",
+-	whisperEnabledHint: "When enabled, this pet periodically generates a line via AI and plays the whisper animation (persona = the field below; empty follows the entry).",
++	whisperEnabledHint: "When enabled, this pet periodically samples a line from the local pool and plays the whisper animation (no model call, no request, no delay). Pool = the 「whisper line pool」 card below; empty falls back to the built-in lines.",
+ 	workStatusEnabled: "Work status",
+ 	workStatusEnabledHint: "When enabled, this pet follows DSH work state: thinking / working / waiting / done / error switch animations and show bubbles (pool in top-level config; listening only, no model calls).",
+ 	fixedEnabled: "Pin in place",
+@@ -2397,7 +2469,7 @@ const en = {
+ 	notifyToggle: "System notifications",
+ 	notifyToggleHint: "OS-level toasts (bottom-right of the desktop) for conversation completion, failures, permission requests, and questions — only while this window is unfocused.",
+ 	whisperImageToggle: "Whisper images",
+-	whisperImageToggleHint: "Attach one random meme from the pool to each whisper line (image mapping lives in the top-level `memes` config field). Tokens: a whisper already calls the model every cycle, so the image only appends the name + description of that one meme (~100 chars / ~60 tokens) to the same request — negligible.",
++	whisperImageToggleHint: "Occasionally attach a meme to a whisper line: not every line — roughly half of them pick one random meme from the pool (image mapping lives in the top-level `memes` config field); the rest are plain text. Tokens: zero — whispers are fully local now, so neither the image nor its name/description ever leaves this machine.",
+ 	chatImageToggle: "Chat images",
+ 	chatImageToggleHint: "Let the AI pick one meme from the pool that fits the current context (optional; mapping lives in the top-level `memes` config field). Tokens: every message carries the whole catalog — currently ~1.1k chars (~650 tokens, about 11x the whisper case) and growing with the number of images; turning this off appends nothing at all.",
+ 	confineToggle: "Lock to the current screen",
+@@ -2434,7 +2506,7 @@ const en = {
+ 	"font.comic": "Comic Sans MS",
+ 	"font.system": "System default",
+ 	modelTitle: "AI models & chat context",
+-	modelHint: "Which model each of whisper and chat uses, and how much history every chat request carries. \"Follow current conversation\" uses the model your current conversation is on (default). Global default: applies to every pet, and a pet pack may override it in its own kind file. The options come from the same source as the DSH model picker, served live by the host.",
++	modelHint: "Which model chat uses and how much history every chat request carries. \"Follow current conversation\" uses the model your current conversation is on (default). Whisper is fully local now and never calls a model, so only the chat model is configurable here. Global default: applies to every pet, and a pet pack may override it in its own kind file. The options come from the same source as the DSH model picker, served live by the host.",
+ 	modelFollow: "Follow current conversation",
+ 	modelSearch: "Search models…",
+ 	modelEmpty: "No matching models.",
+@@ -2525,6 +2597,8 @@ function makePetConfigSection(rt) {
+ 		children: "?"
+ 	});
+ 	/** 卡片头：标题 + 问号说明（+ 可选右侧动作，由调用方自行 append） */
++	/** 语句池纯文本 → 数组（一行一条；空行不算数据；首尾空白 trim）。校验 / 保存 / 计数共用这一份，避免口径漂移 */
++	const parseWhisperPool = (text) => String(text ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => s !== "");
+ 	const cardHead = (title, tip$1, end = false) => h("div", {
+ 		className: "dsh-pet-cfg__cardHead",
+ 		children: [h("span", {
+@@ -2866,6 +2940,18 @@ function makePetConfigSection(rt) {
+ 		});
+ 		const [chatMemory, setChatMemory] = useState(5);
+ 		const [chatImageLimit, setChatImageLimit] = useState(10);
++		// 自动行为间隔（秒）：碎碎念周期 / 随机动作之间的停顿。
++		// eventsRefreshSec 是**整段替换**字段，所以 balance 也读进来原样回写，避免保存时把它冲掉。
++		const [whisperSec, setWhisperSec] = useState(300);
++		const [actionSec, setActionSec] = useState(0);
++		const [balanceSec, setBalanceSec] = useState(1800);
++		// 本地语句池：以「一行一条」的纯文本维护（textarea 直接编辑），保存时按行拆成数组
++		const [whisperPool, setWhisperPool] = useState("");
++		// 「随机试一条」抽出来的那句：**就地在卡片里显示**（写到页面底部那行消息里没人看得见）
++		const [poolSample, setPoolSample] = useState("");
++		// 碎碎念气泡的展示参数：停留秒数（0 = 不自动消失）与文字倍率（1 = 正文大小）
++		const [whisperDwellSec, setWhisperDwellSec] = useState(10);
++		const [whisperScale, setWhisperScale] = useState(1.35);
+ 		const [entryPrompt, setEntryPrompt] = useState("");
+ 		const [catalog, setCatalog] = useState(null);
+ 		const [catalogErr, setCatalogErr] = useState(false);
+@@ -2882,11 +2968,27 @@ function makePetConfigSection(rt) {
+ 				position: { ...p.position }
+ 			})));
+ 			setEntryPrompt(typeof m.whisperPrompt === "string" ? m.whisperPrompt : "");
++			setWhisperPool(Array.isArray(m.whisperLines) ? m.whisperLines.filter((s) => typeof s === "string").join("\n") : "");
+ 			setSelId((id) => loadedPets.some((p) => p.id === id) ? id : loadedPets[0]?.id ?? "");
+ 			if (typeof m.notificationsEnabled === "boolean") setNotifyEnabled(m.notificationsEnabled);
+ 			if (typeof m.whisperImageEnabled === "boolean") setWhisperImage(m.whisperImageEnabled);
+ 			if (typeof m.chatImageEnabled === "boolean") setChatImage(m.chatImageEnabled);
+ 			if (typeof m.confineToScreen === "boolean") setConfineScreen(m.confineToScreen);
++			// 自动行为间隔：读到就用，读不到留在内置默认（300 / 0 / 1800）
++			const ers = m.eventsRefreshSec;
++			if (ers && typeof ers === "object" && !Array.isArray(ers)) {
++				const wSec = Number(ers.whisper);
++				const aSec = Number(ers.action);
++				const bSec = Number(ers.balance);
++				setWhisperSec(Number.isFinite(wSec) && wSec > 0 ? wSec : 300);
++				setActionSec(Number.isFinite(aSec) && aSec >= 0 ? aSec : 0);
++				setBalanceSec(Number.isFinite(bSec) && bSec > 0 ? bSec : 1800);
++			}
++			// 碎碎念气泡展示参数：读到就用，读不到留在内置默认（10 秒 / 1.35 倍）
++			const dwSec = Number(m.whisperBubbleSec);
++			const txtScale = Number(m.whisperTextScale);
++			setWhisperDwellSec(Number.isFinite(dwSec) && dwSec >= 0 ? dwSec : 10);
++			setWhisperScale(Number.isFinite(txtScale) && txtScale > 0 ? txtScale : 1.35);
+ 			if (m.physics && typeof m.physics === "object") setPhysics({
+ 				...DEFAULT_PHYSICS,
+ 				...m.physics
+@@ -2991,6 +3093,8 @@ function makePetConfigSection(rt) {
+ 			};
+ 		}));
+ 		const validated = () => {
++			// 语句池按行拆分（同一份拆法给校验与保存用，避免两处口径漂移）
++			const poolLines = parseWhisperPool(whisperPool);
+ 			for (const p of pets) if (!Number.isFinite(p.size) || p.size <= 0 || !Number.isFinite(p.position.marginX) || !Number.isFinite(p.position.marginY)) {
+ 				setMsg({
+ 					kind: "err",
+@@ -3005,13 +3109,45 @@ function makePetConfigSection(rt) {
+ 				});
+ 				return false;
+ 			}
+-			if (!modelPairValid(whisperModel) || !modelPairValid(chatModel)) {
++			// whisperModel 不再校验/上报：碎碎念已全部本地化，没有模型可配（旧配置里的值由宿主原样保留）
++			if (!modelPairValid(chatModel)) {
+ 				setMsg({
+ 					kind: "err",
+ 					text: t("invalidModel")
+ 				});
+ 				return false;
+ 			}
++			// 自动行为间隔：碎碎念周期 ≥60（宿主也会夹到 60，这里提前拦，免得"填了 5 却按 60 跑"）；
++			// 动作间隔 ≥0（0 = 动作播完立刻抽下一个）
++			if (!Number.isFinite(whisperSec) || whisperSec < 60) {
++				setMsg({
++					kind: "err",
++					text: t("invalidWhisperSec")
++				});
++				return false;
++			}
++			if (!Number.isFinite(actionSec) || actionSec < 0) {
++				setMsg({
++					kind: "err",
++					text: t("invalidActionSec")
++				});
++				return false;
++			}
++			// 碎碎念气泡展示参数：停留 0–600 秒（0 = 不自动消失）、文字倍率 0.8–3（与宿主校验同一口径）
++			if (!Number.isFinite(whisperDwellSec) || whisperDwellSec < 0 || whisperDwellSec > 600) {
++				setMsg({
++					kind: "err",
++					text: t("invalidWhisperDwell")
++				});
++				return false;
++			}
++			if (!Number.isFinite(whisperScale) || whisperScale < .8 || whisperScale > 3) {
++				setMsg({
++					kind: "err",
++					text: t("invalidWhisperScale")
++				});
++				return false;
++			}
+ 			if (!Number.isFinite(chatMemory) || chatMemory < 0) {
+ 				setMsg({
+ 					kind: "err",
+@@ -3026,6 +3162,14 @@ function makePetConfigSection(rt) {
+ 				});
+ 				return false;
+ 			}
++			// 语句池：空行不算数据（按行拆分后丢掉），其余每条非空、单行 ≤ 2000 字（与宿主校验同一口径）
++			if (poolLines.some((s) => s.length > 2000)) {
++				setMsg({
++					kind: "err",
++					text: t("invalidWhisperPool")
++				});
++				return false;
++			}
+ 			if (!FONT_PRESETS.some((p) => p.id === font.family) || !Number.isFinite(font.size) || font.size < FONT_SIZE_MIN || font.size > FONT_SIZE_MAX) {
+ 				setMsg({
+ 					kind: "err",
+@@ -3052,10 +3196,19 @@ function makePetConfigSection(rt) {
+ 					chatImageEnabled: chatImage,
+ 					confineToScreen: confineScreen,
+ 					physics,
+-					whisperModel,
+ 					chatModel,
+ 					chatMemoryRounds: chatMemory,
+ 					chatImageLimit,
++					// 自动行为间隔：整段写回（balance 原样带回，免得被"整段替换"冲成默认）
++					eventsRefreshSec: {
++						balance: balanceSec,
++						whisper: whisperSec,
++						action: actionSec
++					},
++					whisperLines: parseWhisperPool(whisperPool),
++					// 碎碎念气泡展示（停留秒数 / 文字倍率）
++					whisperBubbleSec: whisperDwellSec,
++					whisperTextScale: whisperScale,
+ 					font
+ 				};
+ 				const res = await fetch("/dsh-pet-7340/config" + (force === true ? "?force=1" : ""), {
+@@ -3377,6 +3530,148 @@ function makePetConfigSection(rt) {
+ 						]
+ 					})]
+ 				}),
++				h("div", {
++					className: "dsh-pet-cfg__card",
++					children: [
++						cardHead(t("autoTitle"), t("autoHint")),
++						h("div", {
++							className: "dsh-pet-cfg__grid2",
++							children: [
++								field(t("whisperSecLabel"), h("input", {
++									type: "number",
++									className: inputClass,
++									step: "10",
++									min: "60",
++									value: String(whisperSec),
++									disabled: busy,
++									onChange: (e) => setWhisperSec(Number(e.target.value))
++								}), t("whisperSecHint")),
++								field(t("actionSecLabel"), h("input", {
++									type: "number",
++									className: inputClass,
++									step: "1",
++									min: "0",
++									value: String(actionSec),
++									disabled: busy,
++									onChange: (e) => setActionSec(Number(e.target.value))
++								}), t("actionSecHint"), true)
++							]
++						})
++					]
++				}),
++				h("div", {
++					className: "dsh-pet-cfg__card",
++					children: [
++						cardHead(t("whisperPoolTitle"), t("whisperPoolHint")),
++						// 气泡展示：停留多久 + 文字多大（改的是用户层全局默认，所有宠物一起生效）
++						h("div", {
++							className: "dsh-pet-cfg__grid2",
++							children: [field(t("whisperDwellLabel"), h("input", {
++								className: inputClass,
++								type: "number",
++								min: 0,
++								max: 600,
++								step: 1,
++								value: String(whisperDwellSec),
++								disabled: busy,
++								onChange: (e) => setWhisperDwellSec(Number(e.target.value))
++							}), t("whisperDwellHint")), field(t("whisperScaleLabel"), h("input", {
++								className: inputClass,
++								type: "number",
++								min: 0.8,
++								max: 3,
++								step: 0.05,
++								value: String(whisperScale),
++								disabled: busy,
++								onChange: (e) => setWhisperScale(Number(e.target.value))
++							}), t("whisperScaleHint"), true)]
++						}),
++						h("div", {
++							className: "dsh-pet-cfg__field",
++							children: [h("div", {
++								className: "dsh-pet-cfg__persona",
++								children: [h("textarea", {
++									className: inputClass + " dsh-pet-cfg__area",
++									rows: 10,
++									spellCheck: false,
++									value: whisperPool,
++									disabled: busy,
++									placeholder: t("whisperPoolPlaceholder"),
++									onChange: (e) => setWhisperPool(e.target.value)
++								}), h("span", {
++									className: "dsh-pet-cfg__count",
++									children: t("whisperPoolCount").replace("{n}", String(parseWhisperPool(whisperPool).length))
++								})]
++							})]
++						}),
++						h("div", {
++							className: "dsh-pet-cfg__grid2",
++							children: [h("button", {
++								type: "button",
++								className: "dsh-pet-cfg__btn is-sm",
++								disabled: busy,
++								onClick: () => {
++									const poolLines = parseWhisperPool(whisperPool);
++									if (poolLines.length === 0) {
++										setPoolSample("");
++										setMsg({
++											kind: "err",
++											text: t("whisperPoolSampleEmpty")
++										});
++										return;
++									}
++									setMsg({
++										kind: "",
++										text: ""
++									});
++									setPoolSample(poolLines[Math.floor(Math.random() * poolLines.length)]);
++								},
++								children: t("whisperPoolSample")
++							}), h("button", {
++								type: "button",
++								className: "dsh-pet-cfg__btn is-sm",
++								disabled: busy || poolSample === "" || !selId,
++								onClick: () => {
++									const id = selId;
++									fetch("/dsh-pet-7340/whisper?pet=" + encodeURIComponent(id) + "&surface=web&text=" + encodeURIComponent(poolSample), { method: "POST" }).then((r) => r.ok ? r.json() : null).then((r) => {
++										if (r && r.ok) {
++											setMsg({
++												kind: "",
++												text: t("whisperPoolSayOk")
++											});
++											return;
++										}
++										setMsg({
++											kind: "err",
++											text: t("whisperPoolSayFail") + (r?.message ? "（" + r.message + "）" : "")
++										});
++									}).catch(() => setMsg({
++										kind: "err",
++										text: t("whisperPoolSayFail")
++									}));
++								},
++								children: t("whisperPoolSay")
++							})]
++						}),
++						// 抽出来的那句就地预览：字号跟着「文字倍率」走，预览即所见
++						poolSample === "" ? null : h("div", {
++							className: "dsh-pet-cfg__sample",
++							style: {
++								marginTop: 8,
++								padding: "8px 12px",
++								borderRadius: 10,
++								background: "rgba(255,255,255,.92)",
++								boxShadow: "0 4px 14px rgba(0,0,0,.12)",
++								color: "#1f1f1f",
++								fontWeight: 600,
++								fontSize: (13 * (Number.isFinite(whisperScale) && whisperScale > 0 ? whisperScale : 1.35)).toFixed(1) + "px",
++								lineHeight: 1.5,
++								overflowWrap: "break-word"
++							},
++							children: poolSample
++						})
++					]
++				}),
+ 				h("div", {
+ 					className: "dsh-pet-cfg__card",
+ 					children: [
+@@ -3430,7 +3725,7 @@ function makePetConfigSection(rt) {
+ 						}) : null,
+ 						h("div", {
+ 							className: "dsh-pet-cfg__grid2",
+-							children: [modelCell("whisperModel", whisperModel, setWhisperModel), modelCell("chatModel", chatModel, setChatModel, true)]
++							children: [modelCell("chatModel", chatModel, setChatModel, true)]
+ 						}),
+ 						h("div", {
+ 							className: "dsh-pet-cfg__grid4",
+@@ -3680,10 +3975,10 @@ const STATE_FALLBACK_MS = 1e3;
+ /** 内联 CSS —— 注入一次（官方插件标准做法） */
+ const css = [
+ 	".dsh-pet-root{position:fixed;z-index:40;pointer-events:none;user-select:none}",
+-	".dsh-pet-root[data-corner=\"bottom-right\"]{right:var(--dsh-pet-mx,24px);bottom:var(--dsh-pet-my,0)}",
+-	".dsh-pet-root[data-corner=\"bottom-left\"]{left:var(--dsh-pet-mx,24px);bottom:var(--dsh-pet-my,0)}",
+-	".dsh-pet-root[data-corner=\"top-right\"]{right:var(--dsh-pet-mx,24px);top:var(--dsh-pet-my,0)}",
+-	".dsh-pet-root[data-corner=\"top-left\"]{left:var(--dsh-pet-mx,24px);top:var(--dsh-pet-my,0)}",
++	".dsh-pet-root[data-corner=\"bottom-right\"]{right:calc(var(--dsh-pet-mx,24px) - var(--dsh-pet-sr,0px));bottom:var(--dsh-pet-my,0)}",
++	".dsh-pet-root[data-corner=\"bottom-left\"]{left:calc(var(--dsh-pet-mx,24px) - var(--dsh-pet-sl,0px));bottom:var(--dsh-pet-my,0)}",
++	".dsh-pet-root[data-corner=\"top-right\"]{right:calc(var(--dsh-pet-mx,24px) - var(--dsh-pet-sr,0px));top:var(--dsh-pet-my,0)}",
++	".dsh-pet-root[data-corner=\"top-left\"]{left:calc(var(--dsh-pet-mx,24px) - var(--dsh-pet-sl,0px));top:var(--dsh-pet-my,0)}",
+ 	".dsh-pet-stage{position:relative;width:var(--dsh-pet-size,462px);height:calc(var(--dsh-pet-size,462px)*9/16);pointer-events:none}",
+ 	".dsh-pet-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;opacity:0;transition:opacity .18s ease;transform-origin:center}",
+ 	".dsh-pet-video.is-front{opacity:1}",
+@@ -3715,11 +4010,40 @@ function makePetUI(rt) {
+ 	/** 碎碎念气泡（哑组件：文本与显隐由 PetCard 传入） */
+ 	const WhisperBubble = makeWhisperBubble({ h });
+ 	/** 单个宠物实例（配置由容器 PetMulti 传入；碎碎念轮询/触发/气泡完全自理） */
+-	function PetCard({ cfg, balance, balanceTick, balanceNoticeTick, balanceManual, workStatus, workStatusTick, say, sayTick, animCue, animCueTick, posCue, posCueTick, throwCue, throwCueTick, lock, lockTick, menuItemsRef, arena }) {
++	function PetCard({ cfg, balance, balanceTick, balanceNoticeTick, balanceManual, workStatus, workStatusTick, say, sayTick, animCue, animCueTick, posCue, posCueTick, throwCue, throwCueTick, lock, lockTick, menuItemsRef, arena, dismissTip }) {
+ 		const [size, setSize] = useState(cfg.size);
+ 		const fontPx = resolveFontPx(cfg.font, size);
+ 		const halfW = size / 2;
+ 		const halfH = size * 9 / 16 / 2;
++	/** 碎碎念气泡的**文字倍率**（设置页「文字倍率」，默认 1.35×）：写进 CSS 变量，气泡规则读它。
++	*  这里再收一次范围（0.8–3），保证 host 那边漏校验/手改文件写歪了也不会把气泡撑爆。 */
++	const whisperScale = (() => {
++		const n = Number(cfg.whisperTextScale);
++		return Number.isFinite(n) && n >= .8 && n <= 3 ? n : 1.35;
++	})();
++	/** 碎碎念气泡**停留毫秒**（设置页「停留秒数」，默认 10s）。**0 = 不自动消失**：留到下一句碎碎念、
++	*  或被别的气泡/`POST /bubble/clear` 顶掉——调用方看到 0 就不设定时器。 */
++	const whisperDwellMs = (() => {
++		const n = Number(cfg.whisperBubbleSec);
++		return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : BUBBLE_DURATION_MS;
++	})();
++		/** 角色两侧的透明留白：HIT_BOX 之外的部分允许贴到屏幕边缘外（否则宠物永远碰不到边框） */
++		const sideAllow = HIT_BOX.x0 / 640 * size;
++		const sideAllowR = (640 - HIT_BOX.x1) / 640 * size;
++		/** 把「舞台左上角」夹进视口。所有落位（拖拽/抛掷/存档坐标）都走这里，宠物就别想跑出边框 */
++		const clampPetBox = (x, y) => {
++			const b = throwBounds({
++				W: window.innerWidth,
++				H: window.innerHeight,
++				size,
++				sideAllow,
++				sideAllowR
++			});
++			return {
++				x: Math.min(Math.max(x, b.minX), b.maxX),
++				y: Math.min(Math.max(y, b.minY), b.maxY)
++			};
++		};
+ 		const bottomPad = size * (9 / 16) * (CANVAS_H - FEET_Y) / CANVAS_H;
+ 		const petAnims = cfg.animations;
+ 		const petWeights = cfg.animationWeights;
+@@ -4158,6 +4482,14 @@ function makePetUI(rt) {
+ 			setWhisperText(null);
+ 			setWhisperImage(void 0);
+ 		};
++		/** 点气泡收起工作状态气泡（同 clearWhisperBubble：只收起气泡本身，不动正在播的动画）。
++		*  终端态的成功/失败气泡本来 10 秒自动收，用户点一下可以立刻收掉；运行中的状态气泡点掉后
++		*  下次状态变化会再弹（`stateChanged` 判定在 effect 里，与本函数无关）。 */
++		const dismissWorkBubble = () => {
++			if (workBubbleTimerRef.current !== null) window.clearTimeout(workBubbleTimerRef.current);
++			workBubbleTimerRef.current = null;
++			setWorkBubbleOn(false);
++		};
+ 		const triggerWhisper = (text, image, url, duration, anim$1) => {
+ 			let name = null;
+ 			if (anim$1 !== false) {
+@@ -4180,15 +4512,44 @@ function makePetUI(rt) {
+ 			setWhisperUrl(url);
+ 			setWhisperBubbleOn(true);
+ 			if (whisperBubbleTimerRef.current !== null) window.clearTimeout(whisperBubbleTimerRef.current);
+-			whisperBubbleTimerRef.current = window.setTimeout(() => setWhisperBubbleOn(false), duration ?? BUBBLE_DURATION_MS);
++			const dwellMs = duration ?? whisperDwellMs;
++			// 0 = 「不自动消失」（设置页可配）：只清旧定时器、不挂新的，气泡一直留着
++			if (dwellMs > 0) whisperBubbleTimerRef.current = window.setTimeout(() => setWhisperBubbleOn(false), dwellMs);
+ 		};
+ 		useEffect(() => {
+ 			const onResize = () => setCustomPos((prev) => prev ? { ...prev } : prev);
+ 			window.addEventListener("resize", onResize);
+ 			return () => window.removeEventListener("resize", onResize);
+ 		}, []);
++		/** 动作间隔（eventsRefreshSec.action，秒）：随机动作播完后先播待机、歇这么久再抽下一个 */
++		const lastKindRef = useRef(null);
++		const actionRestUntilRef = useRef(0);
++		const restTimerRef = useRef(null);
++		useEffect(() => () => {
++			if (restTimerRef.current !== null) window.clearTimeout(restTimerRef.current);
++			restTimerRef.current = null;
++		}, []);
+ 		const pickNext = () => {
+ 			if (frozenRef.current) return;
++			const gapMs = Math.max(0, Math.round((cfg.eventsRefreshSec?.action ?? 0) * 1000));
++			const nowMs = performance.now();
++			if (gapMs > 0 && actionRestUntilRef.current > nowMs) {
++				if (restTimerRef.current === null) {
++					const left = actionRestUntilRef.current - nowMs;
++					console.log("[dsh-pet] " + new Date().toTimeString().slice(0, 8) + " pet=" + cfg.id + " 动作间隔: 继续待机 " + Math.round(left / 100) / 10 + "s");
++					if (petAnims.idle.length) {
++						setAnim(pick(petAnims.idle, animRef.current));
++						setOnce(true);
++						setSeq((s) => s + 1);
++					}
++					restTimerRef.current = window.setTimeout(() => {
++						restTimerRef.current = null;
++						pickNext();
++					}, left);
++				}
++				return;
++			}
++			actionRestUntilRef.current = 0;
+ 			const animations = petAnims;
+ 			const animationWeights = petWeights;
+ 			const roll = Math.random();
+@@ -4221,6 +4582,7 @@ function makePetUI(rt) {
+ 				setAnim(next);
+ 			}
+ 			console.log("[dsh-pet] " + new Date().toTimeString().slice(0, 8) + " pet=" + cfg.id + " facing=" + facingRef.current + " roll=" + roll.toFixed(4) + " -> [" + kind + "] " + next);
++			lastKindRef.current = kind;
+ 			setOnce(true);
+ 			setSeq((s) => s + 1);
+ 		};
+@@ -4288,6 +4650,13 @@ function makePetUI(rt) {
+ 				setSeq((s) => s + 1);
+ 				return;
+ 			}
++			// 刚播完的是「随机动作」（不是待机/转身/移动）→ 记下歇息截止时间，由 pickNext 播待机消磨
++			const gapMs = Math.max(0, Math.round((cfg.eventsRefreshSec?.action ?? 0) * 1000));
++			const finishedKind = lastKindRef.current;
++			if (gapMs > 0 && finishedKind && finishedKind !== "IDLE" && finishedKind !== "TURN" && finishedKind !== "MOVES") {
++				actionRestUntilRef.current = performance.now() + gapMs;
++				console.log("[dsh-pet] " + new Date().toTimeString().slice(0, 8) + " pet=" + cfg.id + " 动作间隔: [" + finishedKind + "] 播完，待机 " + Math.round(gapMs / 100) / 10 + "s");
++			}
+ 			pickNext();
+ 		};
+ 		const moveRef = useRef(null);
+@@ -4437,6 +4806,12 @@ function makePetUI(rt) {
+ 				vel.vy = springStep(vel.vy, y, target.y, dt, cfg.physics.throwPower);
+ 				x += vel.vx * dt;
+ 				y += vel.vy * dt;
++				// 拖拽跟手，但不许拖出边框：撞到边界就把该轴速度清零，手感是「顶住了」而不是弹回来
++				const cb = clampPetBox(x, y);
++				if (cb.x !== x) vel.vx = 0;
++				if (cb.y !== y) vel.vy = 0;
++				x = cb.x;
++				y = cb.y;
+ 				boxPxRef.current = {
+ 					x,
+ 					y
+@@ -4453,6 +4828,10 @@ function makePetUI(rt) {
+ 		const startThrow = (px, py, vx, vy) => {
+ 			stopDragFollow();
+ 			stopMove();
++			// 不管谁传进来的起点，先保证在框内（否则一抛就从屏外飞进来）
++			const startBox = clampPetBox(px, py);
++			px = startBox.x;
++			py = startBox.y;
+ 			const bounds = throwBounds({
+ 				W: window.innerWidth,
+ 				H: window.innerHeight,
+@@ -4941,10 +5320,7 @@ function makePetUI(rt) {
+ 				x: e.clientX,
+ 				y: e.clientY
+ 			}], now);
+-			dragTargetRef.current = {
+-				x: e.clientX - d.offX - halfW,
+-				y: e.clientY - d.offY - halfH
+-			};
++			dragTargetRef.current = clampPetBox(e.clientX - d.offX - halfW, e.clientY - d.offY - halfH);
+ 			const rootEl = rootRef.current;
+ 			if (rootEl) startDragFollow(rootEl);
+ 			const stageEl = stageRef.current;
+@@ -4974,8 +5350,16 @@ function makePetUI(rt) {
+ 					setOnce(true);
+ 				}
+ 				const bx = boxPxRef.current;
+-				const px = bx ? bx.x : e.clientX - d.offX - halfW;
+-				const py = bx ? bx.y : e.clientY - d.offY - halfH;
++				const raw0 = bx ? {
++					x: bx.x,
++					y: bx.y
++				} : {
++					x: e.clientX - d.offX - halfW,
++					y: e.clientY - d.offY - halfH
++				};
++				const release0 = clampPetBox(raw0.x, raw0.y);
++				const px = release0.x;
++				const py = release0.y;
+ 				if (d.sling) {
+ 					const pullX = px + halfW - d.anchorX;
+ 					const pullY = py + halfH - d.anchorY;
+@@ -5152,14 +5536,13 @@ function makePetUI(rt) {
+ 				}
+ 			});
+ 		};
+-		const sideAllow = HIT_BOX.x0 / 640 * size;
+ 		const stageStyle = dragging ? { transform: "none" } : { transform: "translateY(" + bottomPad + "px)" };
+ 		const rootStyle = customPos ? (() => {
+-			const rx = customPos.rx;
+-			const ry = customPos.ry;
++			// 存档里可能留着越界的老坐标（历史版本写进去的）：渲染时再夹一次
++			const box = clampPetBox(customPos.rx * window.innerWidth - halfW, customPos.ry * window.innerHeight - halfH);
+ 			return {
+-				left: rx * window.innerWidth - halfW + "px",
+-				top: ry * window.innerHeight - halfH + "px",
++				left: box.x + "px",
++				top: box.y + "px",
+ 				right: "auto",
+ 				bottom: "auto"
+ 			};
+@@ -5175,14 +5558,18 @@ function makePetUI(rt) {
+ 		const bubbleNode = (() => {
+ 			if (workTerminal && workBubbleOn && workText && cfg.workStatusEnabled) return h(WhisperBubble, {
+ 				text: workText,
+-				on: workBubbleOn
++				on: workBubbleOn,
++				onDismiss: dismissWorkBubble,
++				dismissTip
+ 			});
+ 			if (whisperBubbleOn && whisperText) return h(WhisperBubble, {
+ 				text: whisperText,
+ 				image: whisperImage,
+ 				url: whisperUrl,
+ 				assetRoot: cfg.assetRoot,
+-				on: whisperBubbleOn
++				on: whisperBubbleOn,
++				onDismiss: clearWhisperBubble,
++				dismissTip
+ 			});
+ 			if (bubbleOn && balance && (cfg.balanceEnabled || balanceManual)) return h(BalanceBubble, {
+ 				state: balance,
+@@ -5192,7 +5579,9 @@ function makePetUI(rt) {
+ 			});
+ 			if (workBubbleOn && workText && cfg.workStatusEnabled) return h(WhisperBubble, {
+ 				text: workText,
+-				on: workBubbleOn
++				on: workBubbleOn,
++				onDismiss: dismissWorkBubble,
++				dismissTip
+ 			});
+ 			return null;
+ 		})();
+@@ -5231,8 +5620,13 @@ function makePetUI(rt) {
+ 				"--dsh-pet-size": size + "px",
+ 				"--dsh-pet-mx": margin.x + "px",
+ 				"--dsh-pet-my": margin.y + "px",
++				// 角色左右透明留白：贴角定位时要把它从 margin 里扣掉，宠物才真的贴到边框上
++				"--dsh-pet-sl": sideAllow + "px",
++				"--dsh-pet-sr": sideAllowR + "px",
+ 				"--dsh-pet-font-bubble": fontPx.bubble + "px",
+-				"--dsh-pet-font-tip": fontPx.tip + "px"
++				"--dsh-pet-font-tip": fontPx.tip + "px",
++				// 碎碎念气泡的文字倍率（设置页可配；CSS 侧只认这个变量，默认 1.35 兜底）
++				"--dsh-pet-whisper-scale": String(whisperScale)
+ 			}, rootStyle),
+ 			children: [
+ 				bubbleNode,
+@@ -5262,7 +5656,9 @@ function makePetUI(rt) {
+ 		});
+ 	}
+ 	/** 多开容器：一次拉取成品配置 → 拍平 → 渲染多个 PetCard */
+-	function PetMulti() {
++	function PetMulti({ dismissTip: dismissTipProp } = {}) {
++		/** 气泡「点一下收起」的 tooltip 文案：由 apply() 侧的 ctx.locale 注入（这里只是转发给 PetCard） */
++		const bubbleDismissTip = typeof dismissTipProp === "string" && dismissTipProp ? dismissTipProp : void 0;
+ 		const [pets, setPets] = useState([]);
+ 		const [ready, setReady] = useState(false);
+ 		const arenaRef = useRef({ slots: {} });
+@@ -5471,7 +5867,8 @@ function makePetUI(rt) {
+ 			lock: lockRef.current[p.id],
+ 			lockTick,
+ 			menuItemsRef,
+-			arena: arenaRef
++			arena: arenaRef,
++			dismissTip: bubbleDismissTip
+ 		})) : null;
+ 	}
+ 	return PetMulti;
+@@ -5786,7 +6183,7 @@ function makeFactory() {
+ 					name: "shell.overlay",
+ 					id: "pet",
+ 					order: 1e3
+-				}, () => h(PetMulti, {}));
++				}, () => h(PetMulti, { dismissTip: t("bubbleDismissTip") }));
+ 			});
+ 			const PetConfigSection = makePetConfigSection({
+ 				h,
+@@ -5818,7 +6215,7 @@ function makeFactory() {
+ //#endregion
+ //#region src/client/index.ts
+ window.__ModuleLoader__.load({
+-	id: "dsh-pet",
++	id: "@tuweizhi/dsh-pet",
+ 	factory: makeFactory()
+ });
+ 

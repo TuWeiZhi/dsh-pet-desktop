@@ -1,0 +1,87 @@
+diff --git a/lib/client.js b/lib/client.js
+index 06d5bf5..f5de187 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -2949,6 +2949,13 @@ function makePetConfigSection(rt) {
+ 		const [whisperPool, setWhisperPool] = useState("");
+ 		// 「随机试一条」抽出来的那句：**就地在卡片里显示**（写到页面底部那行消息里没人看得见）
+ 		const [poolSample, setPoolSample] = useState("");
++		// 「让宠物说这句」的结果提示：就地显示在按钮下面。
++		// 以前复用页面顶部的 msg —— 语句池卡片离顶部隔着一屏，成功/报错根本看不见，
++		// 失败时用户只会觉得「点了没反应」。
++		const [sayMsg, setSayMsg] = useState({
++			kind: "",
++			text: ""
++		});
+ 		// 碎碎念气泡的展示参数：停留秒数（0 = 不自动消失）与文字倍率（1 = 正文大小）
+ 		const [whisperDwellSec, setWhisperDwellSec] = useState(10);
+ 		const [whisperScale, setWhisperScale] = useState(1.35);
+@@ -3614,13 +3621,13 @@ function makePetConfigSection(rt) {
+ 									const poolLines = parseWhisperPool(whisperPool);
+ 									if (poolLines.length === 0) {
+ 										setPoolSample("");
+-										setMsg({
++										setSayMsg({
+ 											kind: "err",
+ 											text: t("whisperPoolSampleEmpty")
+ 										});
+ 										return;
+ 									}
+-									setMsg({
++									setSayMsg({
+ 										kind: "",
+ 										text: ""
+ 									});
+@@ -3633,19 +3640,22 @@ function makePetConfigSection(rt) {
+ 								disabled: busy || poolSample === "" || !selId,
+ 								onClick: () => {
+ 									const id = selId;
+-									fetch("/dsh-pet-7340/whisper?pet=" + encodeURIComponent(id) + "&surface=web&text=" + encodeURIComponent(poolSample), { method: "POST" }).then((r) => r.ok ? r.json() : null).then((r) => {
++									fetch("/dsh-pet-7340/whisper?pet=" + encodeURIComponent(id) + 									// surface 必须与该宠物实际的显示位置对齐，否则宿主直接回 pet-not-displayed：
++									// 这里以前写死 web，只显示在桌面的宠物（display=desktop）点这颗按钮永远「没效果」。
++									// 用 any —— web / desktop / both 三种都满足；用户点的就是眼前这只，在哪端说都行。
++									"&surface=any&text=" + encodeURIComponent(poolSample), { method: "POST" }).then((r) => r.ok ? r.json() : null).then((r) => {
+ 										if (r && r.ok) {
+-											setMsg({
++											setSayMsg({
+ 												kind: "",
+ 												text: t("whisperPoolSayOk")
+ 											});
+ 											return;
+ 										}
+-										setMsg({
++										setSayMsg({
+ 											kind: "err",
+ 											text: t("whisperPoolSayFail") + (r?.message ? "（" + r.message + "）" : "")
+ 										});
+-									}).catch(() => setMsg({
++									}).catch(() => setSayMsg({
+ 										kind: "err",
+ 										text: t("whisperPoolSayFail")
+ 									}));
+@@ -3653,6 +3663,15 @@ function makePetConfigSection(rt) {
+ 								children: t("whisperPoolSay")
+ 							})]
+ 						}),
++						// 「说这句」的结果就地显示在按钮正下方（不再跨屏写到顶部的 msg）
++						sayMsg.text ? h("div", {
++							className: "dsh-pet-cfg__msg" + (sayMsg.kind === "err" ? " is-err" : ""),
++							style: {
++								marginTop: 6,
++								marginLeft: 0
++							},
++							children: sayMsg.text
++						}) : null,
+ 						// 抽出来的那句就地预览：字号跟着「文字倍率」走，预览即所见
+ 						poolSample === "" ? null : h("div", {
+ 							className: "dsh-pet-cfg__sample",
+@@ -5427,7 +5446,8 @@ function makePetUI(rt) {
+ 			}
+ 			if (leaf$1.action === "whisper") {
+ 				console.info("[dsh-pet] 菜单触发碎碎念 pet=" + cfg.id);
+-				postAction("/dsh-pet-7340/whisper?pet=" + encodeURIComponent(cfg.id) + "&surface=web").then((ok) => {
++				// surface 用 any：网页端与桌面端共用这份代码，写死 web 会让「仅桌面」的宠物点了没反应
++				postAction("/dsh-pet-7340/whisper?pet=" + encodeURIComponent(cfg.id) + "&surface=any").then((ok) => {
+ 					if (!ok) console.warn("[dsh-pet] 碎碎念手动触发失败 pet=" + cfg.id);
+ 				}).catch((e) => console.warn("[dsh-pet] 碎碎念手动触发异常", e));
+ 				return;

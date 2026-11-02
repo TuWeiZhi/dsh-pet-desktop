@@ -1,0 +1,92 @@
+diff --git a/src/host/helper-process.ts b/src/host/helper-process.ts
+index 6d91b9d..3ddd0a1 100644
+--- a/src/host/helper-process.ts
++++ b/src/host/helper-process.ts
+@@ -165,6 +165,10 @@ export interface EnsureElectronOptions {
+   mirror?: string;
+   /** 单次下载超时（默认 10 分钟）。 */
+   timeoutMs?: number;
++  /** 单次尝试的超时（默认 min(timeoutMs, 3 分钟)）：超时立刻换下一个镜像重试。 */
++  attemptTimeoutMs?: number;
++  /** 显式镜像列表（默认 [mirror, GitHub releases]，可被 DSH_PET_ELECTRON_MIRRORS 覆盖，用 | 分隔）。 */
++  mirrors?: string[];
+ }
+ 
+ /**
+@@ -185,28 +189,44 @@ export async function ensureElectronDownload(options: EnsureElectronOptions = {}
+   const log = (message: string): void => console.log(`[dsh-pet] ${message}`);
+   const warn = (message: string): void => console.warn(`[dsh-pet] ${message}`);
+   const startedAt = Date.now();
++  // 每次尝试的超时：原实现是"整段 10 分钟、一次不重试"，网络抖一下（fetch failed）
++  // 就直接放弃，用户只看到"选了仅桌面没有任何反应"。改成按镜像逐个尝试，单次失败立刻换源。
++  const attemptTimeoutMs = options.attemptTimeoutMs ?? Math.min(timeoutMs, 180 * 1000);
++  const mirrors = (
++    options.mirrors ||
++    String(
++      process.env.DSH_PET_ELECTRON_MIRRORS ||
++        `${mirror}|https://github.com/electron/electron/releases/download/`,
++    )
++  )
++    .split('|')
++    .map((item) => item.trim())
++    .filter(Boolean);
+ 
+   log(`Electron not found, downloading v${version} (${PLAT}-${process.arch}) ...`);
+ 
+-  try {
+-    // 目录创建也可能失败（权限不足、同名文件等），与下载失败一样降级到浏览器宠物。
+-    mkdirSync(targetDir, { recursive: true });
+-    // 官方 @electron/get 下载：负责 URL 拼装、镜像、SHA256 校验（sumchecker）、下载缓存
+-    // （同一版本只下载一次，之后命中缓存秒回）。超时用 AbortController 传给 fetch。
++  let lastError: unknown;
++  for (let attempt = 0; attempt < mirrors.length; attempt += 1) {
++    const base = mirrors[attempt];
++    log(`download attempt ${attempt + 1}/${mirrors.length}: ${base}`);
+     const controller = new AbortController();
+     const timer = setTimeout(
+-      () => controller.abort(new Error(`Electron download timed out after ${timeoutMs}ms`)),
+-      timeoutMs,
++      () => controller.abort(new Error(`Electron download timed out after ${attemptTimeoutMs}ms`)),
++      attemptTimeoutMs,
+     );
+     timer.unref?.();
+     let nextLogAt = Date.now() + 3000;
+     try {
++      // 目录创建也可能失败（权限不足、同名文件等），与下载失败一样降级到浏览器宠物。
++      mkdirSync(targetDir, { recursive: true });
++      // 官方 @electron/get 下载：负责 URL 拼装、镜像、SHA256 校验（sumchecker）、下载缓存
++      // （同一版本只下载一次，之后命中缓存秒回）。超时用 AbortController 传给 fetch。
+       const zipPath = await downloadArtifact({
+         version: `v${version}`,
+         artifactName: 'electron',
+         // platform/arch 不传：@electron/get 用宿主平台与架构自动推断
+         // （getHostArch 还处理 arm → armv7l 特例，比显式传 process.arch 更准）
+-        mirrorOptions: { mirror: mirror.replace(/\/$/, '') + '/' },
++        mirrorOptions: { mirror: base.replace(/\/$/, '') + '/' },
+         downloadOptions: {
+           signal: controller.signal,
+           quiet: true, // 关掉 @electron/get 自己的进度条（stdout 走宿主日志，不进 bridge 协议）
+@@ -240,14 +260,19 @@ export async function ensureElectronDownload(options: EnsureElectronOptions = {}
+       const readySeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+       log(`ready in ${readySeconds}s: ${exe}`);
+       return exe;
++    } catch (error) {
++      lastError = error;
++      warn(
++        `download attempt ${attempt + 1} failed: ${error instanceof Error ? error.message : String(error)}`,
++      );
+     } finally {
+       clearTimeout(timer);
+     }
+-  } catch (error) {
+-    warn(`ensure failed: ${error instanceof Error ? error.message : String(error)}`);
+-    warn('desktop pet unavailable. Set DSH_PET_ELECTRON_PATH to an existing Electron, or retry later.');
+-    return undefined;
+   }
++
++  warn(`ensure failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
++  warn('desktop pet unavailable. Set DSH_PET_ELECTRON_PATH to an existing Electron, or retry later.');
++  return undefined;
+ }
+ 
+ export function defaultLaunch(options: HelperOptions = {}): { command: string; args: string[] } {

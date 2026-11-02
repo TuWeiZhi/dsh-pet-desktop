@@ -1,0 +1,121 @@
+diff --git a/src/host/config.ts b/src/host/config.ts
+index 8f2d8df..d606ec3 100644
+--- a/src/host/config.ts
++++ b/src/host/config.ts
+@@ -119,19 +119,77 @@ function warnOnce(key: string, message: string): void {
+ /** 剥除 JSONC 注释（行注释 // 与块注释）得到纯 JSON */
+ function stripJsonc(src: string): string {
+   return src
++    // 先剥 UTF-8 BOM（记事本等编辑器保存会带）。注意 String.trim() 本身也会吃掉
++    // U+FEFF，这里显式剥一次是为了不依赖它、也避免 BOM 落在非首位时残留。
++    // 真正的坑不在这里，而是下面的 readJsonc：解析失败被静默吞掉 → 回退默认值
++    // → 设置页再保存一次就把用户配置覆盖没了。
++    .replace(/^\uFEFF/, '')
+     .replace(/\/\*[\s\S]*?\*\//g, '')
+     .replace(/(^|[^\\:])\/\/.*$/gm, '$1')
+     .trim();
+ }
+ 
+-/** 读取并解析 JSONC 文件；不存在/解析失败 → undefined（调用方决定处理） */
++/**
++ * 读取并解析 JSONC 文件；不存在 → undefined（首次使用，正常）；**存在但解析不了 → 喊一声**。
++ *
++ * 除了 utf8，还容忍 utf16le / utf16be：Windows 上 PowerShell 5.1 的 `>` / `Out-File`
++ * 以及部分编辑器会写出 UTF-16，按 utf8 读出来是一串 NUL 字节，JSON.parse 必然抛错。
++ * 而抛错在这里会被**静默**降级成「没有用户配置」→ 回退包内默认值（用户看到的就是
++ * 「我的配置全没了」）→ 设置页随后一保存，默认值就把用户配置整份覆盖掉。
++ * 这条链路真实踩过，所以：能多试一种解码就多试，实在解析不了也必须留下明确的告警，
++ * 不能再一声不响地把用户的配置当成不存在。
++ */
+ function readJsonc(path: string): Record<string, unknown> | undefined {
++  let bytes: Buffer;
+   try {
+-    const raw = JSON.parse(stripJsonc(readFileSync(path, 'utf8'))) as unknown;
+-    return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined;
++    bytes = readFileSync(path);
+   } catch {
+-    return undefined;
++    return undefined; // 文件不存在：首次使用，正常路径，不必告警
++  }
++
++  const decodings: string[] = [];
++  const hasBomLe = bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe;
++  const hasBomBe = bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff;
++  if (hasBomLe) decodings.push('utf16le');
++  if (hasBomBe) decodings.push('utf16be');
++  decodings.push('utf8');
++  // 没有 BOM 但内容像 UTF-16（大量 0x00）时，也补一次 utf16le 尝试
++  if (!hasBomLe && !hasBomBe && bytes.length > 4) {
++    const sample = bytes.subarray(0, Math.min(bytes.length, 512));
++    let zeros = 0;
++    for (const byte of sample) if (byte === 0) zeros += 1;
++    if (zeros > sample.length / 4) decodings.push('utf16le');
++  }
++
++  for (const encoding of decodings) {
++    let text: string;
++    if (encoding === 'utf16be') {
++      text = Buffer.from(bytes).swap16().toString('utf16le');
++    } else {
++      text = bytes.toString(encoding as BufferEncoding);
++    }
++    try {
++      const raw = JSON.parse(stripJsonc(text)) as unknown;
++      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
++        if (encoding !== 'utf8') {
++          warnOnce(
++            'config-encoding:' + path,
++            `用户配置不是 UTF-8（按 ${encoding} 读成功）：${path}，建议另存为 UTF-8`,
++          );
++        }
++        return raw as Record<string, unknown>;
++      }
++    } catch {
++      // 换下一种解码继续试
++    }
+   }
++
++  warnOnce(
++    'config-unparsable:' + path,
++    '用户配置读不出来（编码或 JSONC 语法问题），已临时回退包内默认值，原文件未被修改：' + path +
++      ' ｜ 修好后保存一次设置即可恢复；此前的备份见同目录 main-config.jsonc.bak-*',
++  );
++  return undefined;
+ }
+ 
+ /**
+@@ -818,9 +876,34 @@ export function saveUserConfig(
+  *
+  * 默认文件缺失/目录不可写 → 直接抛（宿主回 500）：绝不静默留下半个配置文件。
+  */
++/**
++ * 覆盖用户配置前，先留一份带时间戳的备份。
++ *
++ * 为什么必须有：用户层配置是长期攒下来的（碎碎念语句池几百条、人设、物理手感等），
++ * 而写用户配置的路径不止一条（PUT /config 保存、POST /config 恢复默认、解析失败后 force 覆盖）。
++ * 只要写进去的是一份"只剩 pets 的残缺配置"，用户的配置就永久没了，而且全程没有任何提示。
++ * 备份失败不阻断写入（备份是保险，不是前置条件），但必须打日志，保证还能人工找回。
++ */
++export function backupUserConfig(paths: ConfigPaths): string | undefined {
++  const file = effectiveUserFile(paths);
++  if (!file) return undefined;
++  try {
++    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
++    const target = file + '.bak-' + stamp;
++    if (existsSync(target)) return target;
++    writeFileSync(target, readFileSync(file));
++    console.warn('[dsh-pet] 已备份用户配置：' + target);
++    return target;
++  } catch (error) {
++    console.warn('[dsh-pet] 备份用户配置失败：' + (error instanceof Error ? error.message : String(error)));
++    return undefined;
++  }
++}
++
+ export function syncUserConfigFromDefault(paths: ConfigPaths): void {
+   const raw = readFileSync(paths.defaultFile, 'utf8');
+   mkdirSync(dirname(paths.userFile), { recursive: true });
++  backupUserConfig(paths);
+   writeFileSync(paths.userFile, raw, 'utf8');
+ }
+ 

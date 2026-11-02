@@ -1,0 +1,33 @@
+# 统一 LF：Windows 上编辑过的文本也不会把 CRLF 带进仓库/包
+* text=auto eol=lf
+
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.ts    text eol=lf
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.patch text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+LICENSE text eol=lf
+
+# 二进制：一律不做换行/合并处理
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.gif  binary
+*.ico  binary
+*.webm binary
+*.mp4  binary
+*.mov  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.zip  binary
+*.tgz  binary

@@ -1,0 +1,263 @@
+
+'use strict';
+(() => {
+  // 令牌只放在地址栏 hash 里，一刷新就丢；这里顺手存一份到 sessionStorage，
+  // 让同一标签页刷新后还能继续保存（每次重启应用令牌都会换，所以不做长期持久化）。
+  const hashToken = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+  try {
+    if (hashToken) sessionStorage.setItem('dsh-pet-token', hashToken);
+  } catch (ignored) { /* 隐私模式下 sessionStorage 可能不可用，忽略即可 */ }
+  let storedToken = '';
+  try { storedToken = sessionStorage.getItem('dsh-pet-token') || ''; } catch (ignored) { storedToken = ''; }
+  const token = hashToken || storedToken;
+  history.replaceState(null, '', location.pathname);
+  const get = id => document.getElementById(id);
+  const form = get('settings');
+  const status = get('status');
+  const save = get('save');
+  const testBtn = get('test-btn');
+  const testResult = get('test-result');
+  const nameBox = get('petName');
+  const poolNote = get('pool-note');
+  const linesBox = get('whisperLines');
+  let config = null;
+  let lastSample = '';
+
+  function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
+  function note(text, error = false) { poolNote.textContent = text; poolNote.dataset.error = String(error); }
+
+  async function request(method, body) {
+    const response = await fetch('/standalone-ai/settings', {
+      method, credentials: 'omit', cache: 'no-store', redirect: 'error',
+      headers: { 'X-DSH-Pet-Token': token, ...(body ? {'Content-Type': 'application/json'} : {}) },
+      ...(body ? {body: JSON.stringify(body)} : {})
+    });
+    if (!response.ok) {
+      if (response.status === 403) throw new Error('打开凭据已失效。请从桌宠菜单重新打开设置。');
+      if (response.status === 429) throw new Error('保存过于频繁，请稍等一分钟再试。');
+      throw new Error('设置未保存。请检查接口地址、模型名称与密钥，再重试。');
+    }
+    return response.json();
+  }
+
+  async function petApi(method, path, body) {
+    const response = await fetch(path, {
+      method, credentials: 'omit', cache: 'no-store', redirect: 'error',
+      headers: { 'X-DSH-Pet-Token': token, ...(body ? {'Content-Type': 'application/json'} : {}) },
+      ...(body ? {body: JSON.stringify(body)} : {})
+    });
+    if (response.status === 403) throw new Error('打开凭据已失效。请从桌宠菜单重新打开设置。');
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error((data && data.error) || ('保存失败（HTTP ' + response.status + '）'));
+      error.needConfirm = Boolean(data && data.needConfirm);
+      throw error;
+    }
+    return data;
+  }
+
+  const mainEntry = () => (config && config.main) || {};
+  const pets = () => (Array.isArray(mainEntry().pets) ? mainEntry().pets : []);
+  // 独立版只跑一只桌宠，不再让用户在列表里挑。
+  const current = () => pets()[0] || null;
+
+  function poolLines() {
+    return linesBox.value.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '');
+  }
+  function updateCount() { get('pool-count').textContent = '共 ' + poolLines().length + ' 条'; }
+
+  function applyPet() {
+    const pet = current();
+    if (!pet) return;
+    nameBox.value = String(pet.name || pet.id || '');
+    const size = Number(pet.size);
+    get('petSize').value = String(Number.isFinite(size) && size > 0 ? Math.round(size) : 462);
+    get('petFixed').checked = pet.fixedEnabled === true;
+    get('petWhisper').checked = pet.whisperEnabled === true;
+    const entry = mainEntry();
+    const schedule = entry.eventsRefreshSec || {};
+    const whisperSec = Number(schedule.whisper);
+    get('whisperSec').value = String(Number.isFinite(whisperSec) && whisperSec > 0 ? Math.round(whisperSec) : 300);
+    const actionSec = Number(schedule.action);
+    get('actionSec').value = String(Number.isFinite(actionSec) && actionSec >= 0 ? Math.round(actionSec) : 0);
+    const bubbleSec = Number(entry.whisperBubbleSec);
+    get('bubbleSec').value = String(Number.isFinite(bubbleSec) && bubbleSec >= 0 ? bubbleSec : 10);
+    const textScale = Number(entry.whisperTextScale);
+    // 配置里的倍率可能带着 float32 尾差（1.35 → 1.350000023841858），显示时收成两位小数。
+    get('textScale').value = String(Number.isFinite(textScale) && textScale > 0 ? Number(textScale.toFixed(2)) : 1.35);
+    linesBox.value = (Array.isArray(entry.whisperLines) ? entry.whisperLines : []).join('\n');
+    updateCount();
+  }
+
+  function fillPets() { applyPet(); }
+
+  function collectPets() {
+    const size = Number(get('petSize').value);
+    const name = nameBox.value.trim();
+    return pets().map((pet, index) => {
+      const mine = index === 0;
+      const entry = {
+        id: String(pet.id),
+        size: mine ? size : pet.size,
+        // 独立桌面版没有余额功能，也不区分浏览器/桌面显示，落盘时统一钉死。
+        balanceEnabled: false,
+        display: mine ? 'desktop' : pet.display,
+        position: pet.position,
+        whisperEnabled: mine ? get('petWhisper').checked : pet.whisperEnabled === true,
+        fixedEnabled: mine ? get('petFixed').checked : pet.fixedEnabled === true
+      };
+      const finalName = mine ? name : String(pet.name || '').trim();
+      if (finalName) entry.name = finalName;
+      return entry;
+    });
+  }
+
+  function collectConfigBody() {
+    const schedule = {};
+    const currentSchedule = mainEntry().eventsRefreshSec || {};
+    for (const key of Object.keys(currentSchedule)) schedule[key] = Number(currentSchedule[key]);
+    schedule.whisper = Math.max(60, Math.round(Number(get('whisperSec').value)));
+    schedule.action = Math.max(0, Math.round(Number(get('actionSec').value)));
+    return {
+      pets: collectPets(),
+      eventsRefreshSec: schedule,
+      whisperBubbleSec: Number(get('bubbleSec').value),
+      whisperTextScale: Number(get('textScale').value),
+      whisperLines: poolLines()
+    };
+  }
+
+  function populateAi(data) {
+    for (const id of ['protocol', 'baseUrl', 'model', 'whisperIntervalSec', 'maxTokens']) {
+      if (data[id] !== undefined && get(id)) get(id).value = String(data[id]);
+    }
+    for (const id of ['enabled', 'automaticWhispers']) if (get(id)) get(id).checked = data[id] === true;
+    get('key-state').textContent = data.hasKey ? '已保存 · 不回显' : '尚未设置';
+    get('apiKey').value = '';
+    get('clearApiKey').checked = false;
+  }
+
+  linesBox.addEventListener('input', () => { lastSample = ''; updateCount(); });
+
+  get('clearApiKey').addEventListener('change', () => {
+    get('apiKey').disabled = get('clearApiKey').checked;
+    if (get('clearApiKey').checked) {
+      get('apiKey').value = '';
+      get('enabled').checked = false;
+    }
+  });
+
+  get('pool-sample').addEventListener('click', () => {
+    const lines = poolLines();
+    if (!lines.length) { lastSample = ''; note('语句池是空的，会自动使用内置保底语句。', true); return; }
+    lastSample = lines[Math.floor(Math.random() * lines.length)];
+    note('抽到：' + lastSample);
+  });
+
+  get('pool-say').addEventListener('click', async () => {
+    const pet = current();
+    if (!pet) { note('还没有可用的桌宠。', true); return; }
+    const lines = poolLines();
+    if (!lastSample) lastSample = lines.length ? lines[Math.floor(Math.random() * lines.length)] : '';
+    if (!lastSample) { note('语句池是空的，先填一条再试。', true); return; }
+    const button = get('pool-say');
+    button.disabled = true;
+    note('正在让桌宠说这一句…');
+    try {
+      const query = '/dsh-pet-7340/whisper?pet=' + encodeURIComponent(String(pet.id)) + '&surface=any&text=' + encodeURIComponent(lastSample);
+      const data = await petApi('POST', query);
+      if (data && data.ok) note('已让「' + String(nameBox.value.trim() || pet.name || pet.id) + '」说：' + lastSample);
+      else note((data && data.message) || '桌宠没有响应，可能它现在没有显示在桌面。', true);
+    } catch (error) { note(error.message, true); }
+    finally { button.disabled = false; }
+  });
+
+  if (testBtn && testResult) {
+    testBtn.addEventListener('click', async () => {
+      testBtn.disabled = true;
+      testResult.className = 'test-result';
+      testResult.textContent = '正在测试连接，请稍候…';
+      const input = {
+        protocol: get('protocol').value,
+        baseUrl: get('baseUrl').value.trim(),
+        model: get('model').value.trim(),
+        apiKey: get('apiKey').value.trim(),
+      };
+      try {
+        const response = await fetch('/standalone-ai/test', {
+          method: 'POST',
+          credentials: 'omit',
+          cache: 'no-store',
+          headers: {
+            'X-DSH-Pet-Token': token,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        });
+        const data = await response.json();
+        if (data.ok) {
+          testResult.className = 'test-result test-success';
+          testResult.textContent = '✓ ' + data.message;
+          if (data.reply) {
+            const preview = document.createElement('span');
+            preview.className = 'reply-preview';
+            preview.textContent = '回复: ' + data.reply;
+            testResult.appendChild(preview);
+          }
+        } else {
+          testResult.className = 'test-result test-error';
+          testResult.textContent = '✗ ' + (data.message || data.error || '测试失败');
+        }
+      } catch (error) {
+        testResult.className = 'test-result test-error';
+        testResult.textContent = '✗ 请求异常：' + (error && error.message ? error.message : String(error));
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    save.disabled = true;
+    message('正在保存到本机…');
+    const aiInput = {
+      protocol: get('protocol').value, baseUrl: get('baseUrl').value.trim(), model: get('model').value.trim(),
+      apiKey: get('apiKey').value, clearApiKey: get('clearApiKey').checked,
+      enabled: get('enabled').checked, automaticWhispers: get('automaticWhispers') ? get('automaticWhispers').checked : false,
+      whisperIntervalSec: Number(get('whisperIntervalSec') ? get('whisperIntervalSec').value : 300),
+      maxTokens: Number(get('maxTokens') ? get('maxTokens').value : 1024)
+    };
+    try {
+      if (pets().length) {
+        const body = collectConfigBody();
+        let next = null;
+        try {
+          next = await petApi('PUT', '/dsh-pet-7340/config', body);
+        } catch (error) {
+          if (!error.needConfirm) throw error;
+          if (!confirm('本机配置文件读不出来（编码或语法问题）。继续保存会覆盖它，旧文件已自动备份为 main-config.jsonc.bak-*。继续吗？')) throw new Error('已取消保存。');
+          next = await petApi('PUT', '/dsh-pet-7340/config?force=1', body);
+        }
+        if (next && next.main) config = next;
+      }
+      get('apiKey').value = '';
+      populateAi(await request('POST', aiInput));
+      get('apiKey').disabled = false;
+      applyPet();
+      message('已保存到本机。');
+    } catch (error) { message(error.message, true); }
+    finally { save.disabled = false; }
+  });
+
+  if (!token) {
+    message('本次运行的访问凭据已失效（刷新或重开浏览器会丢失）。请从托盘图标右键或宠物右键菜单里的「AI 设置」重新打开本页。', true);
+    return;
+  }
+  petApi('GET', '/dsh-pet-7340/config')
+    .then(data => { config = data; fillPets(); })
+    .catch(error => message('桌宠配置读取失败：' + error.message, true));
+  request('GET').then(data => { populateAi(data); save.disabled = false; message('设置只在本机保存。'); })
+    .catch(error => message(error.message, true));
+})();
