@@ -18,8 +18,8 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --win --dir",
-    "dist": "electron-builder --win nsis"
+    "pack": "electron-builder --win --dir --publish never",
+    "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",

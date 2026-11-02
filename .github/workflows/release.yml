@@ -33,7 +33,9 @@ jobs:
         run: npm ci
 
       - name: 构建 NSIS 安装程序
-        run: npx electron-builder --win nsis
+        # --publish never：tag 触发时 electron-builder 会「隐式发布」到 GitHub Releases，
+        # 但它要 GH_TOKEN 而这里不需要（上传交给下一步的 action-gh-release）。
+        run: npx electron-builder --win nsis --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
