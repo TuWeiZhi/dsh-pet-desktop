@@ -15,6 +15,10 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
   if (!this.pet.workStatusEnabled) return; // 未启用工作状态联动 -> 该宠物完全免疫（与浏览器一致）
   if (tick === 0 || tick === this.prevWorkTick) return;
   this.prevWorkTick = tick;
+  if (this.sleepPhase) {
+    this.workState = snapshot && snapshot.state ? snapshot.state : null;
+    return;
+  }
   // 占用锁（issue #122 第 4 项）：锁生效时不响应工作状态——它是**自动**来源（任务事件驱动），
   // 没有"用户手动要"这条路。判在 tick 消费**之后**：占用期间的变化当过去了，解冻时由
   // applyFreeze 的 resumeWorkStatusAnim() 重新对齐**当前**状态，所以不会停在旧档位上。
@@ -104,6 +108,7 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
 // ---- 余额事件（自动轮询按 balanceEnabled 门控，手动请求无条件；档位与气泡内容来自 shared） ----
 // manual = 这次刷新是用户主动要的（右键「查看余额」/ `/balance` 命令）：不受开关限制，一律给答复。
 PetSprite.prototype.onBalanceTick = function onBalanceTick(state, tick, manual) {
+  if (this.sleepPhase) return;
   if (!this.pet.balanceEnabled && !manual) return; // 自动轮询受开关门控；手动无条件通过（与浏览器一致）
   if (tick === 0 || tick === this.prevTick) return;
   this.prevTick = tick;
@@ -119,6 +124,7 @@ PetSprite.prototype.onBalanceTick = function onBalanceTick(state, tick, manual) 
 // 不 stopMove——本次没有动画要抢前台，宠物没必要停下漫游。
 // 门控：自动轮询要求 balanceEnabled；**手动请求无条件弹**（用户问了就该有答复，包括"服务商不支持"这件事）。
 PetSprite.prototype.showBalanceNotice = function showBalanceNotice(state, manual) {
+  if (this.sleepPhase) return;
   if (!this.pet.balanceEnabled && !manual) return; // 自动轮询受开关门控；手动无条件通过
   if (this.frozen && !manual) return; // 占用锁：自动来源不看；手动照常（用户问了就得有答复）
   if (!state || state.ok) return;
@@ -164,6 +170,7 @@ PetSprite.prototype.clearWhisper = function clearWhisper() {
 //   - duration === 0 表示"这一条不显示"：**不动当前已在显示的气泡**
 //     （要收起它请用 POST /bubble/clear，两件事不重叠）。
 PetSprite.prototype.showWhisper = function showWhisper(text, image, url, duration, anim) {
+  if (this.sleepPhase) return;
   let name = null;
   if (anim !== false) {
     const pool = this.animations.events?.whisper;

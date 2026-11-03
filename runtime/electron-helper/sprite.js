@@ -100,6 +100,7 @@ class PetSprite {
     this.gen = 0;
     this.anim = this.animations.idle[0] ?? '';
     this.once = true;
+    this.sleepPhase = null;
     // 播放回执（issue #122 第 3 项）：当前正在播的**第三方点播**编号（null = 自播动画，不上报）。
     // 为什么要单独一个字段：this.anim 只是动画名，右键菜单点播与第三方 /anim 可以播同名动画，
     // 光看名字分不出"这一段该不该上报回执"。
@@ -249,11 +250,13 @@ class PetSprite {
 
     stage.appendChild(this.videoA);
     stage.appendChild(this.videoB);
-    this.notePose = document.createElement('img');
+    this.notePose = document.createElement('video');
     this.notePose.className = 'pet-note-pose';
-    this.notePose.src = '../../assets/pic/note-holding-look-up.png';
-    this.notePose.alt = '';
+    this.notePose.muted = true;
+    this.notePose.playsInline = true;
     this.notePose.hidden = true;
+    this.notePhase = null;
+    this.noteClipToken = 0;
     stage.appendChild(this.notePose);
     stage.appendChild(this.hit);
     this.el.appendChild(this.bubble);
@@ -278,22 +281,62 @@ class PetSprite {
         anchor: { x: this.margin.l + this.size * 0.5, y: this.margin.t + this.bottomPad + this.height * 0.39 },
         bounds: this.visibleClampRect() || { x: 0, y: 0, w: innerWidth, h: innerHeight },
         body: { x: this.margin.l + this.hitRect.x, y: this.margin.t + this.hitRect.y, w: this.hitRect.w },
+        card: this.assetRoot === 'main' ? {
+          x: this.margin.l + this.size / 2 - Math.max(250, this.size * 0.43) / 2,
+          y: this.margin.t + this.bottomPad + this.height * 0.68,
+          w: Math.max(250, this.size * 0.43), h: 130,
+        } : null,
       }),
-      canOpen: () => !this.dragState.active && !this.throwRef && !this.posFollow && !this.frozen && !this.menuOpen && !this.chatOpen,
+      canOpen: () => !this.sleepPhase && !this.dragState.active && !this.throwRef && !this.posFollow && !this.frozen && !this.menuOpen && !this.chatOpen,
       onChange: (open) => {
         if (open) {
           this.stopMove();
           this.setTip(false);
         }
-        // 自定义宠物仍用自己的动画，不换成大肥鱼。
-        this.notePose.hidden = !open || this.assetRoot !== 'main';
-        this.el.classList.toggle('is-noting', open && this.assetRoot === 'main');
+        if (this.assetRoot === 'main') {
+          if (open) {
+            this.note.el.dataset.material = 'video';
+            this.note.el.style.visibility = 'hidden';
+            this.notePhase = 'opening';
+            this.el.classList.add('is-noting');
+            const front = this.front === 0 ? this.videoA : this.videoB;
+            front.pause();
+            this.playNoteClip('拿出', false, () => {
+              if (!this.note.isOpen) return;
+              this.notePhase = 'idle';
+              this.note.el.style.visibility = '';
+              this.note.place();
+              this.note.repaginate();
+              if (this.note.pendingFocus) this.note.input.focus();
+              this.playNoteClip('待机', true);
+              this.syncInputRegions();
+            });
+          } else {
+            this.notePhase = 'closing';
+            this.playNoteClip('收起', false, () => {
+              this.notePhase = null;
+              this.notePose.hidden = true;
+              this.el.classList.remove('is-noting');
+              if (this.sleepPhase || this.frozen) return;
+              if (!this.resumeWorkStatusAnim() && this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
+            });
+          }
+        }
         this.hit.setAttribute('aria-expanded', String(open));
         window.__dshPetDebug.noteOpen = open;
         this.syncInputBusy();
         if (!open && !this.inputBusy()) this.setInteractive(false);
         const front = this.front === 0 ? this.videoA : this.videoB;
-        if (!open && front.ended) this.handleEnded();
+        if (this.assetRoot !== 'main' && !open && front.ended) this.handleEnded();
+      },
+      onPage: direction => {
+        if (this.assetRoot !== 'main' || this.notePhase !== 'idle') return;
+        this.notePhase = 'page';
+        this.playNoteClip(direction < 0 ? '上一页' : '下一页', false, () => {
+          if (!this.note.isOpen) return;
+          this.notePhase = 'idle';
+          this.playNoteClip('待机', true);
+        });
       },
     });
     this.hit.addEventListener('keydown', (e) => {
@@ -570,6 +613,7 @@ class PetSprite {
   // 双缓冲切换（与浏览器同一套：前台 opacity 切换 + 降级视频清 handler 并停播，防残留 ended 雪崩）
   switchTo(next, nextOnce, playbackId, url) {
     if (!next) return;
+    this.cancelNoteClosing();
     const pending = this.pending;
     if (pending && pending.anim === next && pending.once === nextOnce) {
       // 防重命中（单动画点击时目标=当前动画，不重播）：仍消费 Q 弹标记，压当前前台视频，
@@ -607,6 +651,10 @@ class PetSprite {
       if (!this.pending || this.pending.gen !== gen) return;
       this.pending = null;
       console.warn('[dsh-pet] 素材加载失败 pet=' + this.pet.id + ' anim=' + next + '：' + why + '（已释放本次切换）');
+      if (this.sleepPhase && next.startsWith('睡觉-')) {
+        this.sleepPhase = null;
+        if (this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
+      }
       // 播放回执：这一段点播没能播起来 → 如实回 failed（而不是让调用方干等到 timeout）
       if (playbackId) {
         if (this.playback === playbackId) this.playback = null;
@@ -671,6 +719,31 @@ class PetSprite {
     this.switchTo(name, true, playbackId, url);
   }
 
+  playNoteClip(name, loop, onEnded) {
+    const video = this.notePose;
+    const token = ++this.noteClipToken;
+    video.hidden = false;
+    video.onended = () => { if (token === this.noteClipToken && onEnded) onEnded(); };
+    video.onerror = () => {
+      if (token !== this.noteClipToken) return;
+      console.error('[dsh-pet] 便签动画加载失败: ' + name);
+      if (onEnded) onEnded();
+    };
+    video.loop = loop;
+    video.src = '../../assets/webm/' + encodeURIComponent('便签-' + name) + '.webm';
+    video.load();
+    void video.play().catch(() => { if (token === this.noteClipToken && onEnded) onEnded(); });
+  }
+
+  cancelNoteClosing() {
+    if (this.notePhase !== 'closing') return;
+    this.noteClipToken++;
+    this.notePose.pause();
+    this.notePose.hidden = true;
+    this.notePhase = null;
+    this.el.classList.remove('is-noting');
+  }
+
   /** 撤销排着的动作间隔等待（重复调用安全） */
   clearActionGap() {
     if (this.actionGapTimer === null) return;
@@ -684,6 +757,7 @@ class PetSprite {
   // ——停掉漫游/移动，换源播一次，播完由 handleEnded 回到正常动画链（与菜单点一下的 once 同义）。
   // `name` 位置传地址本身：它同时是 pending 的防重键与日志里的标识，地址天然唯一。
   playUrlOnce(url, playbackId) {
+    this.sleepPhase = null;
     this.stopMove();
     this.playOnce(url, playbackId, url);
   }
@@ -722,6 +796,10 @@ class PetSprite {
       return;
     }
     console.log(stamp + ' 占用锁解除：恢复');
+    if (this.sleepPhase) {
+      if (el) void el.play().catch(() => {});
+      return;
+    }
     // 解冻：回到"该播什么就播什么"——非终态工作状态回档位循环，否则回 idle 一次，
     // 播完由 handleEnded 接回随机链（与浏览器同一语义）。
     if (this.resumeWorkStatusAnim()) return;
@@ -753,6 +831,8 @@ class PetSprite {
 
   // 动画链（与浏览器 pickNext 语义一致，纯逻辑在 shared）
   playIdle() {
+    if (this.sleepPhase) return;
+    if (this.notePhase) return;
     if (this.note?.isOpen) return;
     // 占用锁（issue #122 第 4 项）：锁生效时**不掷骰**。这里是随机链的**唯一**入口（只有动画播完
     // 才会走到），一句判断就把随机动画、随机转向、自主走位一起停住——宠物停在最后一帧，
@@ -805,6 +885,29 @@ class PetSprite {
     this.playOnce(next);
   }
 
+  startSleep() {
+    if (this.assetRoot !== 'main' || this.sleepPhase || this.frozen) return;
+    this.note.close();
+    this.stopMove();
+    this.stopThrow();
+    this.clearActionGap();
+    this.sleepPhase = 'start';
+    this.whisperOn = this.bubbleOn = this.workOn = false;
+    this.renderBubble();
+    this.playOnce('睡觉-开始');
+  }
+
+  wakeSleep() {
+    if (!this.sleepPhase || this.sleepPhase === 'end' || this.frozen) return;
+    if (this.sleepPhase === 'start') {
+      this.sleepPhase = null;
+      if (!this.resumeWorkStatusAnim() && this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
+      return;
+    }
+    this.sleepPhase = 'end';
+    this.playOnce('睡觉-起来');
+  }
+
   handleEnded() {
     // 播放回执：前台视频真的播完了 → 如实回 ended。放在拖拽守卫**之前**：
     // "播完了"是既成事实，拖拽守卫管的是动画链怎么推进，不该影响回执的准确性。
@@ -812,6 +915,18 @@ class PetSprite {
       const done = this.playback;
       this.playback = null; // 先清再上报：后续链式换源不该把它当成"被打断"
       this.reportPlayback(done, 'ended');
+    }
+    if (this.sleepPhase && this.pending) return;
+    if (this.sleepPhase && !this.frozen) {
+      if (this.sleepPhase === 'start') {
+        this.sleepPhase = 'loop';
+        this.anim = '睡觉-循环';
+        this.switchTo(this.anim, false);
+      } else if (this.sleepPhase === 'end') {
+        this.sleepPhase = null;
+        if (!this.resumeWorkStatusAnim() && this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
+      }
+      return;
     }
     if (this.dragState.active) return;
     if (this.note?.isOpen) return;
@@ -1369,6 +1484,7 @@ class PetSprite {
     this.syncInputBusy();
     // 先建立拖拽占用再收牌，避免收起回调在 pointerdown 中途把原生窗口切回穿透。
     this.note.close();
+    this.cancelNoteClosing();
     // 弹弓：把「本次是否拉弓」与按下时的宠物中心（anchorX/Y）补进同一次拖拽状态。
     // 放在上报之后是为了不稀释上面那条源码守卫（它要求 busy 必须在建立状态后紧跟着上报）。
     this.dragState.sling = sling;
@@ -1389,7 +1505,7 @@ class PetSprite {
       d.dragging = true;
       // 真正开始拖拽才把舞台拍平（人物随光标拿起；与浏览器 dragging 语义一致）
       this.stage.style.transform = 'none';
-      if (this.animations.drag.length) {
+      if (this.animations.drag.length && !this.sleepPhase) {
         this.playOnce(S.pick(this.animations.drag));
       }
       this.syncInputBusy(); // 拖拽成立：主进程兜底通道闭嘴（见 inputBusy）
@@ -1447,7 +1563,7 @@ class PetSprite {
       // 拖拽松手：workStatus 非终态时恢复状态循环，否则回 idle（与浏览器 handlePointerUp 一致）
       // 修复：旧实现 switchTo(idle,false)（loop=true，ended 永不触发）→ 随机链永远回不来，
       // 永远卡在同一段待机动画；改为 playOnce（once=true）播一遍 → ended → handleEnded → playIdle 随机链
-      if (!this.resumeWorkStatusAnim()) {
+      if (!this.sleepPhase && !this.resumeWorkStatusAnim()) {
         if (this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
       }
       // 释放位置 = 弹簧跟随后的实际包围盒左上角（this.pos 实时；不是指针目标——
@@ -1735,6 +1851,7 @@ class PetSprite {
   onClick(e) {
     const d = this.dragState;
     if (d.active || d.dragging || this.justDragged) return;
+    if (this.sleepPhase) { this.wakeSleep(); return; }
     // Ctrl（macOS 为 Cmd）+ 左键 = 呼出 DSH：与右键菜单「打开网站 / 打开软件」同一动作
     //（open-site），只是它的快捷键——不播点击动画、也不参与积分，避免"摸一下宠物"变成"开窗口"。
     if (isOpenShortcut(e)) {
@@ -1817,6 +1934,7 @@ class PetSprite {
       { label: '便签', action: 'note' },
       { label: '回到初始位置', action: 'home' },
     );
+    if (this.assetRoot === 'main') tools.push({ label: this.sleepPhase ? '起来' : '睡觉', action: this.sleepPhase ? 'wake' : 'sleep' });
     // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
     // 与浏览器端注入的是**同一份**子菜单（shared 的 displayMenuBranch），两端文案/取值不会漂移。
     // 为什么不就地关窗/开窗：桌面宠物共用一个 Electron 进程，窗口是进程启动时按 DSH_PET_PETS
@@ -1829,7 +1947,9 @@ class PetSprite {
     // 某个 owner 只有 1 项时跳过 owner 那层直接平铺（规则见 shared/menu 的 buildMoreBranch）。
     // 放在整棵动作树之后——「更多」是"别的东西"，不插在工具项和动作之间。
     const more = S.buildMoreBranch(this.menuItems);
-    const tree = tools.concat(S.buildMenuTree(this.animations), more ? [more] : []);
+    const tree = this.sleepPhase
+      ? tools.filter((item) => ['wake', 'reload', 'open-site'].includes(item.action))
+      : tools.concat(S.buildMenuTree(this.animations), more ? [more] : []);
     if (!tree.length) return;
     this.menuOpen = true;
     this.setInteractive(true); // 菜单是窗口内 DOM：悬停期间整窗保持可交互，关闭后恢复命中区穿透
@@ -1859,6 +1979,11 @@ class PetSprite {
   onMenuAction(leaf, keepFacing) {
     this.closeMenu();
     if (!leaf || typeof leaf !== 'object') return;
+    if (leaf.action === 'sleep') { this.startSleep(); return; }
+    if (leaf.action === 'wake') { this.wakeSleep(); return; }
+    // 显式点播可以接管动画；其他互动需先唤醒。
+    if (this.sleepPhase && !leaf.anim && leaf.action !== 'reload' && leaf.action !== 'open-site') return;
+    if (leaf.anim) this.sleepPhase = null;
     if (leaf.action === 'note') {
       this.note.show(true);
       return;

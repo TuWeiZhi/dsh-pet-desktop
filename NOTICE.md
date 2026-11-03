@@ -24,8 +24,9 @@ TuWeiZhi/dsh-pet-desktop  0.4.4    Windows 独立安装包
 - 插件版 fork 追加的改动：`Copyright (c) 2026 TuWeiZhi`
 - 本仓库追加的改动：`Copyright (c) 2026 TuWeiZhi`
 - 完整许可全文见 [`LICENSE`](LICENSE)（与上游一致，未改一字）
-- 素材（`assets/webm` 全部动画、`assets/memes`、`assets/fonts`、`assets/pic`、`assets/logo.png`）
-  来自上游，版权归上游作者；本仓库未重新制作，也未改变其许可
+- 内置桌宠动画等素材继承自 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，
+  其中睡觉的三段动画取自上游提交 [`31aa345`](https://github.com/PC2005-cloud/dsh-pet/commit/31aa345b11a18fc16d5fd35c42b8b9441071170e)。
+  桌面便签姿势 `assets/pic/note-holding*.png` 和用户提供的 `assets/webm/便签-*.webm` 动画为本桌面版新增素材。上游许可见 [`LICENSE`](LICENSE)。
 
 插件形态的详细说明（npm 包名、`cordis.patch.yml` 挂载行、entry id 的取舍、
 如何与上游同步）保留在 [`README-PLUGIN.md`](README-PLUGIN.md) 与
@@ -64,7 +65,7 @@ build/icon.ico                    ← 本仓库新增：由 assets/logo.png 生�
 | `runtime/electron-helper/renderer.js` | 改动 | 把 `eventsRefreshSec.action` 换算成毫秒传给 sprite |
 | `runtime/electron-helper/constants.js` | 改动 | 从 URL query 读 `settingsMenu`（渲染端拿不到 `process.env`） |
 
-除此之外的 `lib/`、`runtime/`、`assets/webm`、`src/` 与插件版 0.4.4 **逐字节相同**。
+此表记录相对插件版 0.4.4 的主要桌面改动；后续变化及新增的上游睡觉素材见仓库历史。
 
 ## 4. 桌面版为什么要有两个进程
 

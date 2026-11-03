@@ -1,5 +1,7 @@
 # dsh-pet 桌面版（独立 exe，不依赖 DSH）
 
+> **素材来源**：本项目继承并使用了 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 项目的桌宠动画等素材，感谢原作者和贡献者。来源与许可说明见 [NOTICE.md](NOTICE.md)。
+
 把 [@tuweizhi/dsh-pet](https://github.com/TuWeiZhi/dsh-pet) 插件改造成 **Windows 独立桌面应用**：
 双击 exe 就能在桌面上养宠物，不需要安装 DSH，也不需要用户机器上有 Node.js。
 
@@ -11,7 +13,7 @@
   <img alt="fork of" src="https://img.shields.io/badge/based%20on-dsh--pet%200.4.4-informational">
 </p>
 
-> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.5.0-setup.exe`，双击安装即可。
+> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.6.0-setup.exe`，双击安装即可。
 > 安装包自带 Electron 运行时，安装时无需额外下载运行环境；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
 
 本仓库是插件版的**独立桌面分支**，与插件仓库 [TuWeiZhi/dsh-pet](https://github.com/TuWeiZhi/dsh-pet) 各自演进：
@@ -24,14 +26,14 @@
 从 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载：
 
 ```
-dsh-pet-0.5.0-setup.exe           # Windows x64 安装程序
-dsh-pet-0.5.0-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
+dsh-pet-0.6.0-setup.exe           # Windows x64 安装程序
+dsh-pet-0.6.0-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
 ```
 
 自己构建的产物落在 `dist\`（该目录不入库）：
 
 ```
-dist\dsh-pet-0.5.0-setup.exe
+dist\dsh-pet-0.6.0-setup.exe
 dist\win-unpacked\                # 免安装目录，调试用
 ```
 
@@ -48,9 +50,10 @@ dist\win-unpacked\                # 免安装目录，调试用
 | 开机自启 | 勾选后在 Windows 登录时启动；默认不开启，可取消；卸载时清理本应用的启动项 |
 | 检查更新 | 检查本仓库 GitHub Releases，应用内下载 Windows 安装包并校验 SHA-256；下载期间可取消，完成后确认安装或选择稍后；安装前保存便签并退出桌宠 |
 | 宠物右键 → 首项 | **AI 设置**（独立版没有 `dsh://` 协议，所以不是"打开软件"） |
-| 鼠标悬停宠物 | 约 0.3 秒后举起便签牌；浅蓝实色玻璃观感，遮住头发、露出向上看的眼睛；默认约 10 行，长内容滚动，无字符上限或字符数显示 |
-| 便签编辑 | 编辑即时生效；停顿 400 毫秒后合并异步保存，持续输入时每 2 秒触发保存；收起、重载和正常退出前提交剩余草稿，不显示保存成功提示。鼠标离开宠物和便签区域约 0.45 秒后收起，中文组词期间等待选词结束；支持 `Esc` 收起和右键「便签」打开；没有标题栏和关闭按钮 |
-| 宠物右键其他项 | 碎碎念、对话、回到初始位置、重放动画、更换形象、更多、重载配置（**没有「查看余额」「显示位置」**） |
+| 鼠标悬停宠物 | 约 0.3 秒后播放从身后拿出便签的动画，随后显示人物下方的可编辑便签 |
+| 宠物右键 → 睡觉 | 内置宠物播放入睡和循环睡姿；点击宠物或右键「起来」唤醒，睡姿循环时播放起身后恢复动作，入睡过程中唤醒则直接恢复。睡眠仅在当前桌宠窗口有效，重载后恢复清醒；睡眠期间暂停展示自动气泡与动作，暂不支持上游梦话和宿主级睡眠接口 |
+| 便签编辑 | 每页最多五行，左上角和右上角切换上一页、下一页，右下角显示页码；末页写满五行后可进入新页。编辑自动保存，收起、重载和正常退出前提交剩余草稿；鼠标离开约 0.45 秒后收起，中文组词期间等待选词结束；支持 `Esc` 收起和右键「便签」打开 |
+| 宠物右键其他项 | 碎碎念、对话、回到初始位置、重放动画、更换形象、更多、重载配置（**没有「查看余额」「显示位置」**）；睡眠时先唤醒再使用互动项 |
 | 退出桌宠 | 走 `POST /shutdown` 优雅收尾，不留后台进程 |
 | 卸载 | 控制面板「dsh-pet 桌面宠物」；`%APPDATA%\dsh-pet` 默认保留 |
 
@@ -89,7 +92,7 @@ dsh-pet\
 
 ## 二、和插件版的差别（全部改动清单）
 
-下面记录桌面版入口与打包改动；桌面专属便签在 `runtime/electron-helper/note.js`、`note.css` 中实现，抬眼托举素材为 `assets/pic/note-holding-look-up.png`。默认采用降低透明度的 B 浅蓝玻璃样式，正文覆盖于角色头发前方；通过 `electron tools/note-smoke.cjs --variants` 可生成样式对比图。材质由渐变和描边实现，不会模糊桌面上的其它窗口。网页插件端不显示便签。便签按宠物实例独立保存，不发送给 AI；清除 `helper-runtime` 数据目录会同时清除便签。
+下面记录桌面版入口与打包改动；桌面专属便签在 `runtime/electron-helper/note.js`、`note-pages.js` 和 `note.css` 中实现。内置宠物使用五段 `assets/webm/便签-*.webm` 动画，文字和分页控件覆盖在人物下方的便签上。网页插件端不显示便签。便签按宠物实例独立保存为原有文本格式，不发送给 AI；清除 `helper-runtime` 数据目录会同时清除便签。
 
 ### 新增
 
@@ -169,12 +172,12 @@ npm run pack
 npm run dist
 ```
 
-产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.5.0-setup.exe`。
+产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.6.0-setup.exe`。
 
 ### 静默安装（脚本/自动化用）
 
 ```powershell
-Start-Process dist\dsh-pet-0.5.0-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
+Start-Process dist\dsh-pet-0.6.0-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
 ```
 
 ### 自检

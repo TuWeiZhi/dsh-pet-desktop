@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-// Run with: electron tools/note-smoke.cjs (after npm install).
+// Run with: electron tools/note-smoke.cjs (after npm install); --sleep checks sleep interactions.
 // Uses an isolated temporary profile and fixture server, never the user's pet data.
 // Re-run with DSH_PET_NOTE_TEST_DIR=<printed directory> and --read to check a process restart.
 const root = path.resolve(__dirname, '..');
@@ -93,6 +93,82 @@ app.whenReady().then(async () => {
   const visible = () => run('sprites[0].note.isOpen');
   try {
     await load();
+    if (process.argv.includes('--pages') || process.argv.length === 2) {
+      await hover();
+      await run('sprites[0].note.show(true)');
+      for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      assert.equal(await run('sprites[0].notePhase'), 'idle', 'opening reaches the idle pose');
+      assert.equal(await run('sprites[0].note.el.style.visibility'), '', 'editor is visible');
+      assert.equal(await run('document.activeElement === sprites[0].note.input'), true, 'keyboard opening focuses after the animation');
+      await run(`sprites[0].note.input.value=${JSON.stringify('一\n二\n三\n四\n五')}; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
+      assert.equal(await run('sprites[0].note.next.disabled'), false);
+      await run('sprites[0].note.next.click()');
+      assert.equal(await run('sprites[0].note.pageNumber.textContent'), '2');
+      assert.equal(await run('sprites[0].notePhase'), 'page');
+      await run(`sprites[0].note.input.value='第二页'; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
+      await run('sprites[0].note.flush()');
+      assert.equal(await noteStore.read(await run('sprites[0].note.id')), '一\n二\n三\n四\n五\n第二页');
+      await run(`sprites[0].note.input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));sprites[0].note.input.value='第二页和组词';`);
+      await run('sprites[0].note.flush()');
+      await run(`sprites[0].note.input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))`);
+      await run('sprites[0].note.flush()');
+      assert.equal(await noteStore.read(await run('sprites[0].note.id')), '一\n二\n三\n四\n五\n第二页和组词');
+      for (let i=0; i<100 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      await run('sprites[0].note.prev.click()');
+      assert.equal(await run('sprites[0].note.pageNumber.textContent'), '1');
+      assert.equal(await run('sprites[0].note.input.value'), '一\n二\n三\n四\n五\n');
+      assert.equal(await run('sprites[0].note.isOpen && !sprites[0].note.el.hidden'), true, 'note remains visible during page changes');
+      win.webContents.invalidate();
+      await delay(250);
+      fs.writeFileSync(path.join(output, 'pages-preview.png'), (await win.webContents.capturePage({stayHidden:true,stayAwake:true})).toPNG());
+      await load();
+      assert.equal(await run('sprites[0].note.text'), '一\n二\n三\n四\n五\n第二页和组词', 'saved text survives reload');
+      await run('sprites[0].note.show()');
+      for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      const layoutCheck = await run(`(() => {
+        const n = sprites[0].note;
+        const inputs = ['连续中文与English text 12345 '.repeat(40), 'a\t'.repeat(50), 'word\t'.repeat(40), '😀é'.repeat(60)];
+        return inputs.map(text => {
+          n.text = text;
+          n.repaginate(0);
+          const lengths = [];
+          for (let p=0; p<n.pages.length; p++) { n.page=p; n.renderPage(); lengths.push([n.input.scrollHeight,n.input.clientHeight]); }
+          return {lengths, text:n.text, font:n.measureContext.font, css:getComputedStyle(n.input).font};
+        });
+      })()`);
+      assert.equal(layoutCheck[0].text, '连续中文与English text 12345 '.repeat(40));
+      assert.ok(layoutCheck.every(item => item.lengths.every(([scroll, client]) => scroll <= client + 1)), 'each page fits within five displayed rows: '+JSON.stringify(layoutCheck));
+      await run('sprites[0].note.close()');
+      assert.equal(await run('sprites[0].notePhase'), 'closing');
+      await run(`sprites[0].onMenuAction({anim:'哈欠连天'})`);
+      assert.equal(await run('sprites[0].notePhase'), null, 'a requested action cancels the closing animation');
+      await delay(5500);
+      assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
+      console.log('PASS: opening, five lines, page changes and text preservation');
+      console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
+      app.exit(0); return;
+    }
+    if (process.argv.includes('--sleep')) {
+      await run(`sprites[0].hit.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:400,clientY:260}))`);
+      assert.ok((await run('document.querySelector(".dsh-pet-menu").textContent')).includes('睡觉'));
+      await run(`Array.from(document.querySelectorAll('.dsh-pet-menu-item')).find(e => e.textContent.includes('睡觉')).click()`);
+      assert.equal(await run('sprites[0].sleepPhase'), 'start');
+      for (let i = 0; i < 200 && await run('sprites[0].sleepPhase') !== 'loop'; i++) await delay(100);
+      assert.equal(await run('sprites[0].sleepPhase'), 'loop', 'the real sleep video advances to the loop');
+      for (let i=0; i<50 && !await run('(sprites[0].front === 0 ? sprites[0].videoA : sprites[0].videoB).loop'); i++) await delay(100);
+      assert.equal(await run('(sprites[0].front === 0 ? sprites[0].videoA : sprites[0].videoB).loop'), true);
+      await hover();
+      assert.equal(await visible(), false, 'hover does not open the note while sleeping');
+      await run(`sprites[0].hit.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:400,clientY:260}))`);
+      assert.ok((await run('document.querySelector(".dsh-pet-menu").textContent')).includes('起来'));
+      await run('sprites[0].closeMenu()');
+      await run('sprites[0].hit.click()');
+      assert.equal(await run('sprites[0].sleepPhase'), 'end');
+      for (let i = 0; i < 200 && await run('sprites[0].sleepPhase') !== null; i++) await delay(100);
+      assert.equal(await run('sprites[0].sleepPhase'), null, 'wake video returns to the normal animation chain');
+      console.log('PASS: sleep menu, video playback, note suppression and click to wake');
+      app.exit(0); return;
+    }
     if (process.argv.includes('--read') || process.argv.includes('--read-quit')) {
       assert.equal(await run('sprites[0].note.input.value'), process.argv.includes('--read-quit') ? quitExpected : expected);
       console.log('PASS: memo persisted across Electron process restart');

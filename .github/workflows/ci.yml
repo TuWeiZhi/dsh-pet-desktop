@@ -34,4 +34,4 @@ jobs:
         run: node tools/verify-desktop.mjs
 
       - name: Note and tray regression tests
-        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts
+        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts src/host/note-pages.test.cjs src/host/desktop-sleep.test.cjs
