@@ -269,7 +269,7 @@ class PetNote {
       clearTimeout(this.closeTimer);
       this.closeTimer = null;
       if (!this.isOpen && !this.suppressed && this.openTimer === null && this.canOpen()) {
-        this.openTimer = setTimeout(() => { this.openTimer = null; this.show(); }, 320);
+        this.openTimer = setTimeout(() => { this.openTimer = null; this.show(); }, 1000);
       }
     } else {
       clearTimeout(this.openTimer);

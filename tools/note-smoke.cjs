@@ -89,7 +89,7 @@ app.whenReady().then(async () => {
   // Feed the same forwarded renderer event that the production bridge supplies.
   const move = async (x,y) => { await run(`window.dispatchEvent(new MouseEvent('mousemove',{clientX:${x},clientY:${y},buttons:0}))`); await delay(30); };
   const box = (selector) => run(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
-  const hover = async () => { const b=await box('.pet-hit'); await move(b.x+b.width/2,b.y+b.height/2); await delay(500); };
+  const hover = async () => { const b=await box('.pet-hit'); await move(b.x+b.width/2,b.y+b.height/2); await delay(1100); };
   const visible = () => run('sprites[0].note.isOpen');
   try {
     await load();
