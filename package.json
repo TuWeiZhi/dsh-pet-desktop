@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-desktop",
   "productName": "dsh-pet",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "吃白饭的蓝色大肥鱼，赖在你桌面上不走了。独立 Windows 桌面宠物（不依赖 DSH）。",
   "author": {
     "name": "TuWeiZhi"

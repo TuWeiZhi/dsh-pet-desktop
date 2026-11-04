@@ -6,9 +6,10 @@ function loginOptions({ isPackaged, execPath, appRoot }) {
 }
 
 function createDesktopControls({ app, dialog, shell, version, appRoot, directory, beforeInstall, quit, resume,
-  onChange = () => {}, platform = process.platform, execPath = process.execPath, service = updates }) {
+  onChange = () => {}, platform = process.platform, execPath = process.execPath, service = updates,
+  setInterval: schedule = setInterval }) {
   const login = loginOptions({ isPackaged: app.isPackaged, execPath, appRoot });
-  let phase = 'idle', percent = 0, release = null, installer = null, controller = null;
+  let phase = 'idle', percent = 0, release = null, installer = null, controller = null, checkFailed = false, updateFailed = false;
   const supported = platform === 'win32';
   const notify = () => onChange();
   const errorDialog = (message, error) => dialog.showMessageBox({ type: 'error', title: 'dsh-pet', message, detail: error.message || String(error), buttons: ['知道了'] });
@@ -33,18 +34,11 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
     }
   }
 
-  async function installPrompt() {
-    phase = 'confirming'; notify();
-    const answer = await dialog.showMessageBox({
-      type: 'question', title: '安装更新', message: `v${release.version} 已下载完成`,
-      detail: '确认后将保存便签、退出桌宠，并启动安装程序。',
-      buttons: ['立即安装', '稍后'], defaultId: 1, cancelId: 1,
-    });
-    if (answer.response !== 0) { phase = 'ready'; notify(); return; }
+  async function install() {
     phase = 'installing'; notify();
     let launched = false;
     try {
-      // “稍后”返回后仍会再次校验，未经校验的文件不会启动。
+      // 点击安装时再次校验，未经校验的文件不会启动。
       await service.verifyInstaller(installer, release);
       await beforeInstall();
       const error = await shell.openPath(installer);
@@ -53,27 +47,32 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
       await quit();
     } catch (error) {
       await resume();
-      installer = null; release = null; phase = 'idle'; notify();
-      await errorDialog(launched ? '安装程序已启动，请手动退出桌宠后继续安装' : '未能启动更新安装', error);
+      installer = null; phase = launched ? 'launched' : 'idle'; updateFailed = !launched; notify();
+      console.error(launched ? '[dsh-pet] 安装程序已启动，请手动退出桌宠后继续安装' : '[dsh-pet] 未能启动更新安装', error);
     }
   }
 
   async function check() {
-    if (!supported || (phase !== 'idle' && phase !== 'ready')) return;
-    if (phase === 'ready') return installPrompt();
+    if (!supported || phase !== 'idle') return;
     phase = 'checking'; notify();
     try {
       release = await service.checkRelease(version);
-      if (!release) {
-        await dialog.showMessageBox({ type: 'info', title: '检查更新', message: '当前已是最新版本', detail: `当前版本：v${version}`, buttons: ['知道了'] });
-        return;
-      }
-      const answer = await dialog.showMessageBox({
-        type: 'question', title: '发现新版本', message: `发现 v${release.version}`,
-        detail: `当前版本：v${version}\n安装包约 ${(release.size / 1024 / 1024).toFixed(1)} MB。下载完成后再确认安装。`,
-        buttons: ['下载更新', '取消'], defaultId: 0, cancelId: 1,
-      });
-      if (answer.response !== 0) return;
+      checkFailed = false; updateFailed = false;
+    } catch (error) {
+      checkFailed = true;
+      console.error('[dsh-pet] 检查更新失败', error);
+    } finally {
+      phase = 'idle'; notify();
+    }
+  }
+
+  async function update() {
+    if (!supported) return;
+    if (phase === 'ready') return install();
+    if (phase !== 'idle') return;
+    if (!release) return checkFailed ? check() : undefined;
+    try {
+      updateFailed = false;
       controller = new AbortController();
       phase = 'downloading'; percent = 0; notify();
       installer = await service.downloadRelease(release, directory, {
@@ -81,15 +80,23 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
       });
       if (controller.signal.aborted) return;
       phase = 'ready'; notify();
-      await installPrompt();
     } catch (error) {
-      installer = null; release = null; phase = 'idle';
-      if (!controller?.signal.aborted) await errorDialog('检查或下载更新失败', error);
+      installer = null;
+      if (!controller?.signal.aborted) {
+        updateFailed = true;
+        console.error('[dsh-pet] 下载更新失败', error);
+      }
     } finally {
       controller = null;
-      if (phase !== 'ready' && phase !== 'installing') phase = 'idle';
+      if (phase !== 'ready') phase = 'idle';
       notify();
     }
+  }
+
+  function start() {
+    if (!supported) return;
+    void check();
+    schedule(() => void check(), 24 * 60 * 60 * 1000);
   }
 
   function refresh(menu) {
@@ -97,14 +104,18 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
     if (startup) startup.checked = loginEnabled();
     const update = menu.getMenuItemById('check-updates');
     if (update) {
-      update.enabled = supported && (phase === 'idle' || phase === 'ready');
+      update.enabled = supported && (phase === 'ready' || (phase === 'idle' && (Boolean(release) || checkFailed)));
       switch (phase) {
         case 'checking': update.label = '正在检查更新…'; break;
         case 'downloading': update.label = `正在下载更新：${percent}%`; break;
-        case 'ready': update.label = `安装新版本 v${release.version}…`; break;
-        case 'confirming': update.label = '等待确认安装…'; break;
+        case 'ready': update.label = `点击安装 v${release.version}…`; break;
         case 'installing': update.label = '正在启动安装…'; break;
-        default: update.label = '检查更新…';
+        case 'launched': update.label = '安装程序已启动，请手动退出桌宠'; break;
+        default:
+          if (updateFailed) update.label = '更新失败，点击重试';
+          else if (release) update.label = `点击更新（v${release.version}）`;
+          else if (checkFailed) update.label = '检查更新失败，点击重试';
+          else update.label = `当前版本：v${version}`;
       }
     }
     const cancel = menu.getMenuItemById('cancel-update');
@@ -114,10 +125,10 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
   return {
     items: () => [
       { id: 'launch-at-login', label: '开机自启', type: 'checkbox', enabled: supported, checked: loginEnabled(), click: item => void setStartup(item) },
-      { id: 'check-updates', label: '检查更新…', enabled: supported, click: () => void check() },
+      { id: 'check-updates', label: `当前版本：v${version}`, enabled: false, click: () => void update() },
       { id: 'cancel-update', label: '取消下载更新', visible: false, click: () => controller?.abort() },
     ],
-    refresh, check, setStartup,
+    refresh, check, update, start, setStartup,
   };
 }
 

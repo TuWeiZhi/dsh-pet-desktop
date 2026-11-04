@@ -15,7 +15,7 @@
   <img alt="based on PC2005-cloud/dsh-pet" src="https://img.shields.io/badge/based%20on-PC2005--cloud%2Fdsh--pet-informational">
 </p>
 
-> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.6.4-setup.exe`，双击安装即可。
+> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.6.5-setup.exe`，双击安装即可。
 > 安装包自带 Electron 运行时，安装时无需额外下载运行环境；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
 
 本仓库发布独立桌面版；上游插件与素材制作说明请参见 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。安装后的许可文件位于安装目录的 `resources/app/`。
@@ -29,14 +29,14 @@
 从 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载：
 
 ```
-dsh-pet-0.6.4-setup.exe           # Windows x64 安装程序
-dsh-pet-0.6.4-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
+dsh-pet-0.6.5-setup.exe           # Windows x64 安装程序
+dsh-pet-0.6.5-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
 ```
 
 自己构建的产物落在 `dist\`（该目录不入库）：
 
 ```
-dist\dsh-pet-0.6.4-setup.exe
+dist\dsh-pet-0.6.5-setup.exe
 dist\win-unpacked\                # 免安装目录，调试用
 ```
 
@@ -49,9 +49,9 @@ dist\win-unpacked\                # 免安装目录，调试用
 | 双击安装程序 | 可选安装目录；建桌面快捷方式 + 开始菜单项「dsh-pet 桌面宠物」；安装完自动启动 |
 | 启动应用 | 桌面上出现宠物；托盘出现图标 |
 | 双击第二次 | 不会起第二套，改为打开「桌宠设置」网页 |
-| 托盘图标右键 | 宠物显示/隐藏开关、**AI 设置**、**开机自启**、**检查更新**、**退出桌宠** |
+| 托盘图标右键 | 宠物显示/隐藏开关、**AI 设置**、**开机自启**、更新状态、**退出桌宠** |
 | 开机自启 | 勾选后在 Windows 登录时启动；默认不开启，可取消；卸载时清理本应用的启动项 |
-| 检查更新 | 检查本仓库 GitHub Releases，应用内下载 Windows 安装包并校验 SHA-256；下载期间可取消，完成后确认安装或选择稍后；安装前保存便签并退出桌宠 |
+| 更新状态 | 启动时及运行期间每 24 小时检查 GitHub Releases；无更新时显示当前版本，有更新时点击「点击更新」下载 Windows 安装包并校验 SHA-256。下载可取消，完成后点击「点击安装」保存便签并启动安装；检查或更新失败时可点击重试 |
 | 宠物右键 → 首项 | **AI 设置**（独立版没有 `dsh://` 协议，所以不是"打开软件"） |
 | 鼠标悬停宠物 | 约 0.3 秒后播放从身后拿出便签的动画，随后显示人物下方的可编辑便签 |
 | 宠物右键 → 睡觉 | 内置宠物播放入睡和循环睡姿；点击宠物或右键「起来」唤醒，睡姿循环时播放起身后恢复动作，入睡过程中唤醒则直接恢复。睡眠仅在当前桌宠窗口有效，重载后恢复清醒；睡眠期间暂停展示自动气泡与动作，暂不支持上游梦话和宿主级睡眠接口 |
@@ -175,12 +175,12 @@ npm run pack
 npm run dist
 ```
 
-产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.6.4-setup.exe`。
+产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.6.5-setup.exe`。
 
 ### 静默安装（脚本/自动化用）
 
 ```powershell
-Start-Process dist\dsh-pet-0.6.4-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
+Start-Process dist\dsh-pet-0.6.5-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
 ```
 
 ### 自检
@@ -232,7 +232,7 @@ $env:DSH_PET_DESKTOP_APP = "1"
 - [ ] AI 对话 / 碎碎念实际调用（需要真实 API Key，只验证了设置页读写与 `hasKey`）
 - [ ] 多显示器 / 高 DPI 下的定位（`dpi-linearization.js` 逻辑原样保留，未在新形态下实测）
 - [ ] 代码签名（当前 `no code signing certificate configured`，首次运行 SmartScreen 会拦）
-- [x] 托盘检查新版本、应用内下载、SHA-256 校验、确认后启动安装（手动触发，完整安装包更新）
+- [x] 托盘显示更新状态、应用内下载、SHA-256 校验、手动确认安装（完整安装包更新）
 
 ---
 

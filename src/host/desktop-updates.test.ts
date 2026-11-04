@@ -95,25 +95,117 @@ test('unrelated and machine startup entries do not mark the user checkbox as ena
   assert.equal(controls.items()[0].checked,false);
 });
 
-test('download then postpone never launches an installer; later confirmation flushes before launch', async () => {
-  const {controls,calls}=controlsFixture([0,1,0]);
+test('startup checks immediately, then every 24 hours without opening a dialog', async () => {
+  let tick, interval, checks=0;
+  const fixture=controlsFixture([],{
+    setInterval: (callback, ms) => { tick=callback; interval=ms; },
+    service:{checkRelease:async()=>{ checks++; return null; }},
+  });
+  fixture.controls.start();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(checks,1);
+  assert.equal(interval,24*60*60*1000);
+  assert.equal(fixture.dialogs.length,0);
+  const update={};
+  fixture.controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
+  assert.equal(update.label,'当前版本：v0.4.4');
+  tick();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(checks,2);
+});
+
+test('available update is shown in the tray and installation needs a separate click', async () => {
+  const {controls,calls,dialogs}=controlsFixture([]);
+  const update={};
+  const refresh=()=>controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
   await controls.check();
+  refresh();
+  assert.match(update.label,/点击更新/);
+  assert.equal(update.enabled,true);
+  assert.deepEqual(calls,[]);
+  assert.equal(dialogs.length,0);
+  await controls.update();
+  refresh();
+  assert.match(update.label,/点击安装/);
   assert.deepEqual(calls,['download']);
+  await controls.update();
+  assert.deepEqual(calls,['download','verify','flush','launch','quit']);
+  assert.equal(dialogs.length,0);
+});
+
+test('scheduled checks do not overlap an active check or download', async () => {
+  let finishCheck, finishDownload, checks=0;
+  const fixture=controlsFixture([],{service:{
+    checkRelease:()=>{ checks++; return new Promise(resolve=>{finishCheck=resolve;}); },
+    downloadRelease:()=>new Promise(resolve=>{finishDownload=resolve;}),
+  }});
+  const first=fixture.controls.check();
+  await fixture.controls.check();
+  assert.equal(checks,1);
+  finishCheck(selectRelease(release,'0.4.4'));
+  await first;
+  const download=fixture.controls.update();
+  await fixture.controls.check();
+  assert.equal(checks,1);
+  finishDownload('D:/cache/setup.exe');
+  await download;
+  await fixture.controls.check();
+  assert.equal(checks,1);
+});
+
+test('cancelling a download restores the available update action', async () => {
+  const fixture=controlsFixture([],{service:{
+    checkRelease:async()=>selectRelease(release,'0.4.4'),
+    downloadRelease:(_release,_directory,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')))),
+  }});
+  await fixture.controls.check();
+  const pending=fixture.controls.update();
+  fixture.controls.items().find(item=>item.id==='cancel-update').click();
+  await pending;
+  const update={};
+  fixture.controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
+  assert.match(update.label,/点击更新/);
+  assert.equal(update.enabled,true);
+});
+
+test('a failed background check is visible and can be retried', async () => {
+  let checks=0;
+  const {controls,dialogs}=controlsFixture([],{service:{checkRelease:async()=>{checks++; if (checks===1) throw new Error('offline'); return null;}}});
+  const update={};
   await controls.check();
+  controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
+  assert.match(update.label,/检查更新失败/);
+  assert.equal(update.enabled,true);
+  assert.equal(dialogs.length,0);
+  await controls.update();
+  controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
+  assert.equal(update.label,'当前版本：v0.4.4');
+});
+
+test('download waits for a separate installation click and flushes before launch', async () => {
+  const {controls,calls}=controlsFixture([]);
+  await controls.check();
+  await controls.update();
+  assert.deepEqual(calls,['download']);
+  await controls.update();
   assert.deepEqual(calls,['download','verify','flush','launch','quit']);
 });
 
 test('a failed verification cannot launch the installer', async () => {
-  const fixture=controlsFixture([0,0]);
+  const fixture=controlsFixture([]);
   fixture.options.service.verifyInstaller=async()=>{throw new Error('checksum mismatch');};
   await fixture.controls.check();
+  await fixture.controls.update();
+  await fixture.controls.update();
   assert.ok(!fixture.calls.includes('launch'));
-  assert.ok(fixture.dialogs.some(dialog=>dialog.type==='error'));
+  assert.ok(fixture.calls.includes('resume'));
 });
 
 test('notes must save successfully before installation starts', async () => {
-  const {controls,calls}=controlsFixture([0,0],{beforeInstall:async()=>{throw new Error('disk full');}});
+  const {controls,calls}=controlsFixture([],{beforeInstall:async()=>{throw new Error('disk full');}});
   await controls.check();
+  await controls.update();
+  await controls.update();
   assert.ok(!calls.includes('launch'));
   assert.ok(!calls.includes('quit'));
   assert.ok(calls.includes('resume'));

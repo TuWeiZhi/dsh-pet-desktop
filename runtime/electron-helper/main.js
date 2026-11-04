@@ -869,6 +869,7 @@ async function startTray() {
     trayMenu = Menu.buildFromTemplate([...petItems, ...appItems]);
     tray.setContextMenu(trayMenu);
     tray.on('right-click', () => controls?.refresh(trayMenu));
+    controls?.start();
     // Windows 上 setContextMenu 只接管右键，左键默认什么都不做（macOS 相反：左键即弹菜单）
     if (TRAY_PLATFORM.leftClickPopsMenu) tray.on('click', () => { controls?.refresh(trayMenu); tray.popUpContextMenu(); });
   } catch (e) {
