@@ -105,6 +105,9 @@ app.whenReady().then(async () => {
       await run('sprites[0].note.next.click()');
       assert.equal(await run('sprites[0].note.pageNumber.textContent'), '2');
       assert.equal(await run('sprites[0].notePhase'), 'page');
+      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'), 'rgba(0, 0, 0, 0)', 'the fixed card must not cover the turning video');
+      assert.equal(await run('getComputedStyle(sprites[0].note.input).visibility'), 'hidden', 'text must not float over the turning page');
+      assert.equal(await run('getComputedStyle(sprites[0].note.prev).visibility'), 'visible', 'navigation stays available during the turn');
       await run(`sprites[0].note.input.value='第二页'; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
       await run('sprites[0].note.flush()');
       assert.equal(await noteStore.read(await run('sprites[0].note.id')), '一\n二\n三\n四\n五\n第二页');
@@ -138,13 +141,57 @@ app.whenReady().then(async () => {
       })()`);
       assert.equal(layoutCheck[0].text, '连续中文与English text 12345 '.repeat(40));
       assert.ok(layoutCheck.every(item => item.lengths.every(([scroll, client]) => scroll <= client + 1)), 'each page fits within five displayed rows: '+JSON.stringify(layoutCheck));
+      const waitForNoteIdle = async () => {
+        for (let i=0; i<150 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+        assert.equal(await run('sprites[0].notePhase'), 'idle');
+        assert.equal(await run('sprites[0].note.pageTurning'), false);
+      };
+      await run(`(() => {
+        const pet = sprites[0], n = pet.note;
+        n.text = Array.from({length:21}, (_, i) => 'line ' + i).join('\\n');
+        n.repaginate(0);
+        window.noteTurnClips = [];
+        window.noteTurnDurations = [];
+        window.originalNoteClip = pet.playNoteClip.bind(pet);
+        pet.playNoteClip = (name, loop, done) => {
+          const turning = name === '上一页' || name === '下一页';
+          if (turning) window.noteTurnClips.push(name);
+          const start = performance.now();
+          window.originalNoteClip(name, loop, () => {
+            if (turning) window.noteTurnDurations.push(performance.now() - start);
+            if (done) done();
+          });
+        };
+        n.next.click(); n.next.click(); n.next.click();
+      })()`);
+      assert.equal(await run('sprites[0].note.page'), 1, 'rapid clicks do not jump ahead of the animation');
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 4);
+      await waitForNoteIdle();
+      assert.equal(await run('sprites[0].note.page'), 3);
+      assert.deepEqual(await run('window.noteTurnClips'), ['下一页', '下一页', '下一页']);
+      const turnDurations = await run('window.noteTurnDurations');
+      assert.ok(turnDurations.every(ms => ms >= 800 && ms < 1500), 'page turns should take about one second including media load: ' + turnDurations);
+      console.log('Page-turn elapsed ms: ' + turnDurations.map(Math.round).join(', '));
+      assert.equal(await run('getComputedStyle(sprites[0].note.input).visibility'), 'visible');
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 1);
+      await run('window.noteTurnClips = []; sprites[0].note.prev.click(); sprites[0].note.prev.click()');
+      await waitForNoteIdle();
+      assert.equal(await run('sprites[0].note.page'), 1);
+      assert.deepEqual(await run('window.noteTurnClips'), ['上一页', '上一页']);
+      await run('window.noteTurnClips = []; sprites[0].note.next.click(); sprites[0].note.next.click(); sprites[0].note.close(); sprites[0].note.show(true)');
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
+      await waitForNoteIdle();
+      assert.equal(await run('sprites[0].note.page'), 2, 'closing discards the queued page request');
+      assert.deepEqual(await run('window.noteTurnClips'), ['下一页']);
+      await run('sprites[0].playNoteClip = window.originalNoteClip; void 0');
       await run('sprites[0].note.close()');
       assert.equal(await run('sprites[0].notePhase'), 'closing');
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
       await run(`sprites[0].onMenuAction({anim:'哈欠连天'})`);
       assert.equal(await run('sprites[0].notePhase'), null, 'a requested action cancels the closing animation');
       await delay(5500);
       assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
-      console.log('PASS: opening, five lines, page changes and text preservation');
+      console.log('PASS: opening, five lines, unobscured fast page changes, rapid forward/back navigation, close/reopen and text preservation');
       console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
       app.exit(0); return;
     }

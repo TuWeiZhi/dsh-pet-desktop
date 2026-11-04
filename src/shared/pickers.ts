@@ -1,5 +1,5 @@
 // 纯选择逻辑：不依赖 React / DOM，可独立单测。浏览器 bundle 与桌面 shared-core 共用同一份源码。
-import type { Category, EventSlot, Events, Weights } from './types';
+import type { Animations, Category, EventSlot, Events, Weights } from './types';
 
 /** 从字符串池里等概率随机抽一个；exclude 排除某个名字（避免连续重复） */
 export const pick = <T>(pool: T[], exclude?: T): T => {
@@ -71,6 +71,29 @@ export const pickWeightedCategory = (categories: Category[], facing: string): Ca
 /** 掷骰结果类别 */
 export type RollKind = 'idle' | 'turn' | 'move' | 'action';
 
+/** 桌面自动动作按动画名等概率抽取；分类仅用于组织菜单，不参与权重计算。 */
+export const pickRandomAction = (
+  animations: Animations,
+  facing: string,
+  opts?: { fixed?: boolean },
+): { kind: RollKind; name: string } | null => {
+  const pool = new Map<string, RollKind>();
+  for (const name of animations.idle) pool.set(name, 'idle');
+  if (!opts?.fixed) {
+    for (const name of animations.turn) pool.set(name, 'turn');
+    for (const action of animations.moves.actions) pool.set(action.name, 'move');
+  }
+  for (const category of animations.categories) {
+    if (category.noMirror && facing === 'right') continue;
+    for (const name of category.actions) {
+      if (!pool.has(name)) pool.set(name, 'action');
+    }
+  }
+  if (!pool.size) return null;
+  const [name, kind] = pick([...pool]);
+  return { kind, name };
+};
+
 /** 掷骰选项 */
 export interface RollOptions {
   /** 宠物固定（pets[].fixedEnabled）：true = 把「改变宠物状态」的两档权重按 0 算——
@@ -85,8 +108,7 @@ export interface RollOptions {
  * topEnd = (idle+turn+move)/100：三档权重占比之和，剩余概率归入 'action'。
  * opts.fixed（宠物固定）为真时 turn/move 两档权重按 0 算，只可能返回 'idle' 或 'action'。
  *
- * 浏览器（client/pet.ts 的 pickNext）与桌面（runtime/electron-helper/sprite.js 的 playIdle）
- * 共用本函数，两端随机链行为严格一致。
+ * 浏览器 client/pet.ts 的 pickNext 保留分类权重；桌面 playIdle 使用 pickRandomAction。
  */
 export const rollKind = (roll: number, w: Weights, opts?: RollOptions): RollKind => {
   const turn = opts?.fixed ? 0 : w.turn;

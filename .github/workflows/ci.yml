@@ -33,5 +33,5 @@ jobs:
       - name: Verify desktop package
         run: node tools/verify-desktop.mjs
 
-      - name: Note and tray regression tests
-        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts src/host/note-pages.test.cjs src/host/desktop-sleep.test.cjs
+      - name: Note, animation and tray regression tests
+        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts src/host/note-pages.test.cjs src/host/desktop-sleep.test.cjs src/host/note-animation.test.cjs src/host/desktop-random.test.cjs src/shared/pickers.test.ts

@@ -166,7 +166,7 @@ describe('rollKind —— 随机链掷骰（含宠物固定 fixedEnabled）', ()
 
 describe('宠物固定 —— 双端一致守卫（两端必须都把这个开关传进掷骰）', () => {
   // 背景：随机链在两端各有一层薄壳（浏览器 React 组件 / 桌面 DOM sprite），掷骰本身共用
-  // src/shared/pickers 的 rollKind。若只在其中一端传 fixed，另一端的宠物照样自己走/自己翻，
+  // 浏览器用 rollKind，桌面用 pickRandomAction。若有一端漏传 fixed，宠物照样自己走/自己翻，
   // 表现为「设置页勾了没用」——而且只在一种显示模式下复现，极难排查。这里把两侧钉住。
   const browserShell = readFileSync(fileURLToPath(new URL('../client/pet.ts', import.meta.url)), 'utf8');
   const desktopShell = readFileSync(
@@ -183,8 +183,8 @@ describe('宠物固定 —— 双端一致守卫（两端必须都把这个开�
 
   test('桌面壳（sprite.js 的 playIdle）传了 fixed', () => {
     assert.ok(
-      /rollKind\([^)]*fixed:/.test(desktopShell),
-      'runtime/electron-helper/sprite.js 的 playIdle 必须把 fixed 传进 rollKind（否则桌面里的宠物照旧乱走）',
+      /pickRandomAction\([^)]*fixed:/.test(desktopShell),
+      'runtime/electron-helper/sprite.js 的 playIdle 必须把 fixed 传进 pickRandomAction（否则桌面里的宠物照旧乱走）',
     );
   });
 

@@ -33,6 +33,9 @@ class PetNote {
     this.text = '';
     this.pages = [{ start: 0, end: 0, lines: 1 }];
     this.page = 0;
+    this.targetPage = 0;
+    this.pageTurning = false;
+    this.pageTurnToken = 0;
     this.pageWidth = 1;
     this.canvas = document.createElement('canvas');
     this.measureContext = this.canvas.getContext('2d');
@@ -165,8 +168,10 @@ class PetNote {
     const range = this.pages[this.page];
     const value = this.text.slice(range.start, range.end);
     if (this.input.value !== value) this.input.value = value;
-    this.prev.disabled = this.page === 0;
-    this.next.disabled = this.page === this.pages.length - 1 && range.lines < 5;
+    const target = this.pageTurning ? this.targetPage : this.page;
+    const last = this.pages.length - 1 + (this.pages.at(-1).lines === 5 ? 1 : 0);
+    this.prev.disabled = target === 0;
+    this.next.disabled = target >= last;
     this.pageNumber.textContent = String(this.page + 1);
     if (offset !== null && document.activeElement === this.input) {
       const local = Math.max(0, Math.min(this.input.value.length, offset - range.start));
@@ -194,9 +199,23 @@ class PetNote {
   }
 
   changePage(direction) {
-    if (!this.loaded || this.composing) return;
+    if (!this.loaded || this.composing || !this.isOpen) return;
+    const current = this.pageTurning ? this.targetPage : this.page;
+    const last = this.pages.length - 1 + (this.pages.at(-1).lines === 5 ? 1 : 0);
+    this.targetPage = Math.max(0, Math.min(last, current + direction));
+    if (this.pageTurning) {
+      this.renderPage();
+      return;
+    }
+    this.turnPage();
+  }
+
+  turnPage() {
+    if (this.page === this.targetPage) return;
+    const direction = Math.sign(this.targetPage - this.page);
+    this.pageTurning = true;
+    const token = ++this.pageTurnToken;
     if (direction > 0 && this.page === this.pages.length - 1) {
-      if (this.pages[this.page].lines < 5) return;
       this.text += '\n';
       this.saver.schedule(this.text);
       this.repaginate(this.text.length);
@@ -204,7 +223,19 @@ class PetNote {
       this.page = Math.max(0, Math.min(this.pages.length - 1, this.page + direction));
       this.renderPage();
     }
-    if (this.onPage) this.onPage(direction);
+    const done = () => {
+      if (token !== this.pageTurnToken || !this.pageTurning || !this.isOpen) return;
+      this.pageTurning = false;
+      this.turnPage();
+    };
+    if (this.onPage) this.onPage(direction, done);
+    else done();
+  }
+
+  cancelPageTurns() {
+    this.pageTurnToken++;
+    this.pageTurning = false;
+    this.targetPage = this.page;
   }
 
   saveFailed(error) {
@@ -266,6 +297,7 @@ class PetNote {
 
   close() {
     this.clearTimers();
+    this.cancelPageTurns();
     this.captureComposition();
     // 鼠标仍在交互区时才抑制重开；编辑时已移到外部，下一次进入就应正常展开。
     this.suppressed = this.hovered;
@@ -297,6 +329,7 @@ class PetNote {
   }
 
   dispose() {
+    this.cancelPageTurns();
     const saved = this.flush();
     this.clearTimers();
     this.ac.abort();

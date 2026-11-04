@@ -79,7 +79,6 @@ class PetSprite {
     // 动画池与权重按宠物取：文件宠物（pet/ 目录定义，extra）自带**完整独立**动画池；
     // main 等常规宠物（无 anims 段）用全局 cfg.animations（与浏览器 pet.ts 同一语义）。
     this.animations = pet.animations || cfg.animations;
-    this.weights = pet.animationWeights || cfg.animationWeights;
     // 第三方菜单项（/state 的 sections.menu 快照，由 events.js 的 applyMenuLeaf 灌进来）：
     // 只在右键那一刻拼进菜单，不参与渲染。空数组 = 没有第三方项，菜单里不出现「更多」。
     this.menuItems = [];
@@ -294,6 +293,7 @@ class PetSprite {
           this.setTip(false);
         }
         if (this.assetRoot === 'main') {
+          this.note.el.classList.remove('is-turning');
           if (open) {
             this.note.el.dataset.material = 'video';
             this.note.el.style.visibility = 'hidden';
@@ -329,15 +329,7 @@ class PetSprite {
         const front = this.front === 0 ? this.videoA : this.videoB;
         if (this.assetRoot !== 'main' && !open && front.ended) this.handleEnded();
       },
-      onPage: direction => {
-        if (this.assetRoot !== 'main' || this.notePhase !== 'idle') return;
-        this.notePhase = 'page';
-        this.playNoteClip(direction < 0 ? '上一页' : '下一页', false, () => {
-          if (!this.note.isOpen) return;
-          this.notePhase = 'idle';
-          this.playNoteClip('待机', true);
-        });
-      },
+      onPage: (direction, done) => this.playNotePage(direction, done),
     });
     this.hit.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); this.note.show(true); }
@@ -412,6 +404,8 @@ class PetSprite {
 
   dispose() {
     this.ac.abort();
+    this.noteClipToken++;
+    this.notePose.pause();
     const saved = this.note.dispose();
     this.inputRegionMutation.disconnect();
     this.inputRegionResize.disconnect();
@@ -719,20 +713,44 @@ class PetSprite {
     this.switchTo(name, true, playbackId, url);
   }
 
+  playNotePage(direction, done) {
+    if (this.assetRoot !== 'main' || this.notePhase !== 'idle') { done(); return; }
+    this.notePhase = 'page';
+    this.note.el.classList.add('is-turning');
+    this.playNoteClip(direction < 0 ? '上一页' : '下一页', false, () => {
+      if (!this.note.isOpen) return;
+      this.notePhase = 'idle';
+      this.note.el.classList.remove('is-turning');
+      done();
+      // 连续翻页直接接下一段，队列完成后才恢复待机。
+      if (this.notePhase === 'idle') this.playNoteClip('待机', true);
+    });
+  }
+
   playNoteClip(name, loop, onEnded) {
     const video = this.notePose;
     const token = ++this.noteClipToken;
+    let completed = false;
+    const finish = () => {
+      if (token !== this.noteClipToken || completed) return;
+      completed = true;
+      if (onEnded) onEnded();
+    };
     video.hidden = false;
-    video.onended = () => { if (token === this.noteClipToken && onEnded) onEnded(); };
+    video.onended = finish;
     video.onerror = () => {
       if (token !== this.noteClipToken) return;
       console.error('[dsh-pet] 便签动画加载失败: ' + name);
-      if (onEnded) onEnded();
+      finish();
     };
     video.loop = loop;
+    video.defaultPlaybackRate = loop ? 1 : 2;
+    // 翻页素材约 4 秒，4 倍速保留约 1 秒的动作过程；开合保持 2 倍速。
+    if (name === '上一页' || name === '下一页') video.defaultPlaybackRate = 4;
     video.src = '../../assets/webm/' + encodeURIComponent('便签-' + name) + '.webm';
     video.load();
-    void video.play().catch(() => { if (token === this.noteClipToken && onEnded) onEnded(); });
+    video.playbackRate = video.defaultPlaybackRate;
+    void video.play().catch(finish);
   }
 
   cancelNoteClosing() {
@@ -829,7 +847,7 @@ class PetSprite {
     );
   }
 
-  // 动画链（与浏览器 pickNext 语义一致，纯逻辑在 shared）
+  // 桌面动画链：每个可用的自动动作等概率抽取。
   playIdle() {
     if (this.sleepPhase) return;
     if (this.notePhase) return;
@@ -856,33 +874,20 @@ class PetSprite {
       }
       this.actionRestUntil = 0;
     }
-    const { animations, animationWeights } = { animations: this.animations, animationWeights: this.weights };
-    const roll = Math.random();
-    // 宠物固定（pets[].fixedEnabled）：掷骰时把「转向 / 移动」两档权重按 0 算（与浏览器同一份
-    // 决策）——随机链不再让宠物自己翻朝向或走开。右键菜单点播与 /anim 接口不走这里，不受影响。
-    const k = S.rollKind(roll, animationWeights, { fixed: this.pet.fixedEnabled });
-    let next;
-    if (k === 'idle') {
-      next = S.pick(animations.idle, this.anim);
-    } else if (k === 'turn') {
-      next = S.pick(animations.turn, this.anim);
-    } else if (k === 'move') {
-      const moved = this.tryMove();
-      if (moved === false) {
-        const act = S.pickCategoryAction(animations.categories, animations.idle, this.facing, this.anim);
-        next = act.name;
-      } else if (typeof moved === 'string') {
-        next = moved;
-      } else {
-        // 已有一场移动进行中（占用）：与浏览器一致，重播当前动画，不另设（绝不重复加载不存在的动作）
-        this.playOnce(this.anim);
-        return;
-      }
-    } else {
-      const act = S.pickCategoryAction(animations.categories, animations.idle, this.facing, this.anim);
-      next = act.name;
+    this.playRandomAction();
+  }
+
+  playRandomAction(squash = false) {
+    const action = S.pickRandomAction(this.animations, this.facing, { fixed: this.pet.fixedEnabled });
+    if (!action) return;
+    this.clearActionGap();
+    if (squash) this.pendingSquash = true;
+    if (action.kind === 'move') {
+      // 移动不可达或仍在抛掷时照常播放选中的片段，维持 ended 链且不二次抽签。
+      const moved = this.tryMove(action.name);
+      if (typeof moved === 'string') return;
     }
-    this.playOnce(next);
+    this.playOnce(action.name);
   }
 
   startSleep() {
@@ -1868,11 +1873,9 @@ class PetSprite {
       this.stopMove();
       return;
     }
-    this.stopThrow(); // 点击飞行中的宠物 = 收手停住（再播点击回应）
+    this.stopThrow(); // 点击飞行中的宠物 = 收手停住，再抽取常规动作。
     this.stopMove();
-    if (!this.animations.clicks.length) return;
-    this.pendingSquash = true; // 等新点击动画切到前台后 Q 弹（压新首帧，与浏览器一致）
-    this.playOnce(S.pick(this.animations.clicks));
+    this.playRandomAction(true); // 与自动播放共用动作池，点击立即响应并保留首帧 Q 弹。
   }
 
   // ---- 右键菜单（统一自绘组件：树+渲染都来自 shared-core 的同一份 menu 模块） ----

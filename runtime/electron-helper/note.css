@@ -111,6 +111,14 @@
 .pet-note-prev:focus-visible, .pet-note-next:focus-visible { outline: 2px solid #425b80; }
 .pet-note-page { position: absolute; right: 9px; bottom: 3px; color: #655b5b; font: 11px/14px sans-serif; }
 .pet-note[data-material='video'] .pet-note-status { position: absolute; left: 10px; bottom: 3px; }
+.pet-note[data-material='video'].is-turning {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.pet-note.is-turning .pet-note-text,
+.pet-note.is-turning .pet-note-page,
+.pet-note.is-turning .pet-note-status { visibility: hidden; }
 .pet-note-pose { object-fit: contain; }
 @keyframes note-raise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .pet-note { animation: none; } }

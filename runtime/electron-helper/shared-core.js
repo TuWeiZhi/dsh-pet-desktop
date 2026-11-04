@@ -40,6 +40,23 @@ const nextWorkStatusAnim = (pool, current) => {
 	return pickSlot(slot, current);
 };
 const randomBetween = (min, max) => Math.floor(min + Math.random() * (max - min));
+const pickRandomAction = (animations, facing, opts) => {
+	const pool = new Map();
+	for (const name of animations.idle) pool.set(name, "idle");
+	if (!opts?.fixed) {
+		for (const name of animations.turn) pool.set(name, "turn");
+		for (const action of animations.moves.actions) pool.set(action.name, "move");
+	}
+	for (const category of animations.categories) {
+		if (category.noMirror && facing === "right") continue;
+		for (const name of category.actions) {
+			if (!pool.has(name)) pool.set(name, "action");
+		}
+	}
+	if (!pool.size) return null;
+	const [name, kind] = pick([...pool]);
+	return { kind, name };
+};
 const pickWeightedCategory = (categories, facing) => {
 	const cats = categories.filter((c) => c.actions.length > 0);
 	if (!cats.length) return null;
@@ -2107,6 +2124,7 @@ exports.nearestIndex = nearestIndex
 exports.nextWorkStatusAnim = nextWorkStatusAnim
 exports.pick = pick
 exports.pickCategoryAction = pickCategoryAction
+exports.pickRandomAction = pickRandomAction
 exports.pickSlot = pickSlot
 exports.pickWeightedCategory = pickWeightedCategory
 exports.planMove = planMove
