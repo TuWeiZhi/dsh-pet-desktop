@@ -19,6 +19,8 @@
 本仓库是插件版的**独立桌面分支**，与插件仓库 [TuWeiZhi/dsh-pet](https://github.com/TuWeiZhi/dsh-pet) 各自演进：
 插件版的原始说明保留在 [README-PLUGIN.md](README-PLUGIN.md)，本文件只讲桌面版。
 
+想制作新动作或重做便签动画？参见 [动画素材制作、提示词与参考图](docs/animation-assets.md)。
+
 ---
 
 ## 一、安装包在哪
