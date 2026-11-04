@@ -8,6 +8,7 @@ const { pipeline } = require('node:stream/promises');
 
 const REPOSITORY = 'TuWeiZhi/dsh-pet-desktop';
 const RELEASE_API = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
+const RELEASES = `https://github.com/${REPOSITORY}/releases`;
 
 function versionParts(version) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version);
@@ -42,9 +43,39 @@ async function checkRelease(current, fetcher = globalThis.fetch) {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-pet/' + current },
     signal: AbortSignal.timeout(15000),
   });
+  if (response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) {
+    return checkReleaseWithoutApi(current, fetcher);
+  }
   if (response.status === 404) throw new Error('尚未找到已发布的版本');
   if (!response.ok) throw new Error('检查更新失败：HTTP ' + response.status);
   return selectRelease(await response.json(), current);
+}
+
+async function checkReleaseWithoutApi(current, fetcher) {
+  const headers = { 'User-Agent': 'dsh-pet/' + current };
+  const latest = await fetcher(`${RELEASES}/latest`, {
+    method: 'HEAD', redirect: 'manual', headers, signal: AbortSignal.timeout(15000),
+  });
+  if (latest.status !== 302) throw new Error('无法获取最新版本：HTTP ' + latest.status);
+  const location = latest.headers.get('location') || '';
+  const prefix = `${RELEASES}/tag/`;
+  if (!location.startsWith(prefix)) throw new Error('最新版本来源不匹配');
+  const tag = location.slice(prefix.length);
+  const version = versionParts(tag).join('.');
+  if (!newerVersion(tag, current)) return null;
+  const response = await fetcher(`${RELEASES}/download/${tag}/update-manifest.json`, {
+    headers, signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error('无法获取更新校验信息：HTTP ' + response.status);
+  const source = new URL(response.url);
+  if (source.protocol !== 'https:' || !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(source.hostname)) {
+    throw new Error('更新校验信息来源不可信');
+  }
+  const manifest = await response.json();
+  if (manifest.version !== version) throw new Error('更新校验信息版本不匹配');
+  const name = `dsh-pet-${version}-setup.exe`;
+  return selectRelease({ tag_name: tag, assets: [{ name, size: manifest.size, digest: 'sha256:' + manifest.sha256,
+    browser_download_url: `${RELEASES}/download/${tag}/${name}` }] }, current);
 }
 
 async function verifyInstaller(file, release) {

@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 const require = createRequire(import.meta.url);
-const { newerVersion, selectRelease, downloadRelease, verifyInstaller } = require('../../runtime/electron-helper/desktop-updates.js');
+const { newerVersion, selectRelease, checkRelease, downloadRelease, verifyInstaller } = require('../../runtime/electron-helper/desktop-updates.js');
 const { loginOptions, createDesktopControls } = require('../../runtime/electron-helper/desktop-controls.js');
+const { writeUpdateManifest } = require('../../tools/write-update-manifest.cjs');
 
 const bytes = Buffer.from('test installer bytes (never executed)');
 const digest = createHash('sha256').update(bytes).digest('hex');
@@ -29,6 +30,63 @@ test('numeric release versions and exact installer source are validated', () => 
   assert.equal(selectRelease({...release,prerelease:true},'0.4.4'),null);
   assert.throws(()=>selectRelease({...release,assets:[{...release.assets[0],browser_download_url:'https://evil.example/setup.exe'}]},'0.4.4'),/来源/);
   assert.throws(()=>selectRelease({...release,assets:[{...release.assets[0],digest:null}]},'0.4.4'),/校验/);
+});
+
+test('rate-limited checks use the release page and return the current version without an API response', async () => {
+  const calls=[];
+  const fetcher=async (url, options)=>{
+    calls.push([url,options.method]);
+    if (url.includes('api.github.com')) return new Response('',{status:403,headers:{'x-ratelimit-remaining':'0'}});
+    return new Response(null,{status:302,headers:{location:'https://github.com/TuWeiZhi/dsh-pet-desktop/releases/tag/v0.5.0'}});
+  };
+  assert.equal(await checkRelease('0.5.0',fetcher),null);
+  assert.equal(calls.length,2);
+  assert.equal(calls[1][1],'HEAD');
+});
+
+test('rate-limited checks retrieve verified installer metadata for a newer release', async () => {
+  const fetcher=async url=>{
+    if (url.includes('api.github.com')) return new Response('',{status:403,headers:{'x-ratelimit-remaining':'0'}});
+    if (url.endsWith('/latest')) return new Response(null,{status:302,headers:{location:'https://github.com/TuWeiZhi/dsh-pet-desktop/releases/tag/v0.5.0'}});
+    assert.equal(url,'https://github.com/TuWeiZhi/dsh-pet-desktop/releases/download/v0.5.0/update-manifest.json');
+    const result=new Response(JSON.stringify({version:'0.5.0',size:bytes.length,sha256:digest}));
+    Object.defineProperty(result,'url',{value:'https://release-assets.githubusercontent.com/asset'});
+    return result;
+  };
+  assert.deepEqual(await checkRelease('0.4.4',fetcher),selectRelease(release,'0.4.4'));
+});
+
+test('release manifest contains the exact installer size and SHA-256', async t => {
+  const dir=await mkdtemp(join(tmpdir(),'pet-manifest-'));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  await writeFile(join(dir,'dsh-pet-0.5.0-setup.exe'),bytes);
+  await writeUpdateManifest(dir,'0.5.0');
+  assert.deepEqual(JSON.parse(await readFile(join(dir,'update-manifest.json'),'utf8')),{version:'0.5.0',size:bytes.length,sha256:digest});
+});
+
+test('rate-limit fallback rejects untrusted release redirects and invalid manifests', async () => {
+  const limited=()=>new Response('',{status:403,headers:{'x-ratelimit-remaining':'0'}});
+  const redirect=location=>new Response(null,{status:302,headers:{location}});
+  await assert.rejects(checkRelease('0.4.4',async url=>url.includes('api.github.com')?limited():redirect('https://evil.example/releases/tag/v0.5.0')),/来源/);
+  for (const manifest of [{version:'0.5.1',size:bytes.length,sha256:digest},{version:'0.5.0',size:bytes.length,sha256:'wrong'}]) {
+    const fetcher=async url=>{
+      if (url.includes('api.github.com')) return limited();
+      if (url.endsWith('/latest')) return redirect('https://github.com/TuWeiZhi/dsh-pet-desktop/releases/tag/v0.5.0');
+      const result=new Response(JSON.stringify(manifest));
+      Object.defineProperty(result,'url',{value:'https://release-assets.githubusercontent.com/asset'});
+      return result;
+    };
+    await assert.rejects(checkRelease('0.4.4',fetcher),/校验信息/);
+  }
+  const untrusted=async url=>{
+    if (url.includes('api.github.com')) return limited();
+    if (url.endsWith('/latest')) return redirect('https://github.com/TuWeiZhi/dsh-pet-desktop/releases/tag/v0.5.0');
+    const result=new Response(JSON.stringify({version:'0.5.0',size:bytes.length,sha256:digest}));
+    Object.defineProperty(result,'url',{value:'https://evil.example/manifest'});
+    return result;
+  };
+  await assert.rejects(checkRelease('0.4.4',untrusted),/来源/);
+  await assert.rejects(checkRelease('0.4.4',async()=>new Response('',{status:403})),/HTTP 403/);
 });
 
 test('downloads verified bytes and rejects corruption without leaving partial files', async t => {

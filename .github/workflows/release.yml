@@ -42,12 +42,16 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: 生成更新校验信息
+        run: node tools/write-update-manifest.cjs
+
       - name: 挂到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/dsh-pet-*-setup.exe
             dist/dsh-pet-*-setup.exe.blockmap
+            dist/update-manifest.json
           generate_release_notes: true
           body_path: .github/release-notes.md
           fail_on_unmatched_files: true
