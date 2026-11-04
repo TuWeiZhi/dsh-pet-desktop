@@ -6,13 +6,19 @@
 
 ### 代码许可
 
-- 上游代码：MIT，`Copyright (c) 2026 PC2005-cloud`；完整版权与许可声明见 [`LICENSE`](LICENSE)。
-- 本项目及其沿用的改动：`Copyright (c) 2026 TuWeiZhi`。代码的 MIT 许可不改变以下素材及角色形象的许可条件。
+- 上游代码：MIT，`Copyright (c) 2026 PC2005-cloud`。
+- 桌面版由 TuWeiZhi 开发和改进的代码：MIT，`Copyright (c) 2026 TuWeiZhi`。分发代码时须保留适用的版权声明和许可全文；完整声明见 [`LICENSE`](LICENSE)。代码的 MIT 许可不改变以下素材及角色形象的许可条件。
+
+### 桌面版新增功能与署名
+
+- **作者：TuWeiZhi**（[桌面版项目](https://github.com/TuWeiZhi/dsh-pet-desktop)）。新增和改进的功能包括 Windows 独立安装及 Electron 启动入口、桌面便签及分页和保存、开机自启、应用内更新、桌面设置页与本地碎碎念，以及桌面端睡觉交互和动作播放调整。具体修改见[变更记录](https://github.com/TuWeiZhi/dsh-pet-desktop/blob/main/CHANGELOG.md)与仓库历史。
+- 上述功能的代码贡献按 [`LICENSE`](LICENSE) 中的 MIT 许可发布；其中引用或改造上游代码的部分同时保留上游版权声明。功能使用的角色和素材仍遵循其各自许可。
 
 ### 动画等素材
 
 - 上游作者 PC2005-cloud 在 [v0.3.8 许可说明](https://github.com/PC2005-cloud/dsh-pet/blob/v0.3.8/README.md#许可)中声明：动画、提示词和源视频允许开源使用，**禁止商用**。本项目沿用的上游素材应遵循该说明，不能仅依据代码的 MIT 许可使用。
-- 本项目沿用上游桌宠动画等素材；睡觉的三段动画取自上游提交 [`31aa345`](https://github.com/PC2005-cloud/dsh-pet/commit/31aa345b11a18fc16d5fd35c42b8b9441071170e)。本项目新增了便签姿势 `assets/pic/note-holding*.png` 和用户提供的 `assets/webm/便签-*.webm` 动画；这些素材使用了相同的角色形象，仍须遵循下述形象许可。
+- 本项目沿用上游桌宠动画等素材；睡觉的三段动画取自上游提交 [`31aa345`](https://github.com/PC2005-cloud/dsh-pet/commit/31aa345b11a18fc16d5fd35c42b8b9441071170e)。
+- **桌面版新增素材署名：TuWeiZhi**。新增素材包括便签姿势图片 `assets/pic/note-holding*.png`，以及便签拿出、待机、上一页、下一页、收起五段动画 `assets/webm/便签-*.webm`。这些素材使用上游角色形象；TuWeiZhi 对其中享有权利的形象演绎贡献按 CC BY-NC-SA 4.0 发布，使用时还须遵守下述角色形象许可和保留原作者署名。此声明不代表对素材中其他权利的授权。
 - 上游要求二次创作的介绍、展示和分发处附上原项目地址：<https://github.com/PC2005-cloud/dsh-pet>。
 
 ### 角色形象署名与许可

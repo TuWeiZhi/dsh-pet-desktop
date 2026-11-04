@@ -2,6 +2,8 @@
 
 > **上游与许可**：本项目基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，并使用其桌宠动画等素材。代码采用 MIT 许可；上游素材禁止商用，角色形象遵循 CC BY-NC-SA 4.0。作者署名、修改说明和完整许可见 [NOTICE.md](NOTICE.md)。
 
+> **桌面版新增内容**：TuWeiZhi 开发和改进了独立安装、桌面便签、开机自启、应用内更新等功能，并提供便签姿势及动画素材。新增代码按 MIT 许可发布；新增角色形象演绎素材中 TuWeiZhi 享有权利的部分按 CC BY-NC-SA 4.0 发布，使用时须保留角色原作者署名并遵守非商业和相同方式共享条件。详见 [NOTICE.md](NOTICE.md)。
+
 基于上游 dsh-pet 改造的 **Windows 独立桌面应用**：
 双击 exe 就能在桌面上养宠物，不需要安装 DSH，也不需要用户机器上有 Node.js。
 
@@ -13,7 +15,7 @@
   <img alt="based on PC2005-cloud/dsh-pet" src="https://img.shields.io/badge/based%20on-PC2005--cloud%2Fdsh--pet-informational">
 </p>
 
-> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.6.3-setup.exe`，双击安装即可。
+> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.6.4-setup.exe`，双击安装即可。
 > 安装包自带 Electron 运行时，安装时无需额外下载运行环境；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
 
 本仓库发布独立桌面版；上游插件与素材制作说明请参见 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。安装后的许可文件位于安装目录的 `resources/app/`。
@@ -27,14 +29,14 @@
 从 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载：
 
 ```
-dsh-pet-0.6.3-setup.exe           # Windows x64 安装程序
-dsh-pet-0.6.3-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
+dsh-pet-0.6.4-setup.exe           # Windows x64 安装程序
+dsh-pet-0.6.4-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
 ```
 
 自己构建的产物落在 `dist\`（该目录不入库）：
 
 ```
-dist\dsh-pet-0.6.3-setup.exe
+dist\dsh-pet-0.6.4-setup.exe
 dist\win-unpacked\                # 免安装目录，调试用
 ```
 
@@ -173,12 +175,12 @@ npm run pack
 npm run dist
 ```
 
-产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.6.3-setup.exe`。
+产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.6.4-setup.exe`。
 
 ### 静默安装（脚本/自动化用）
 
 ```powershell
-Start-Process dist\dsh-pet-0.6.3-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
+Start-Process dist\dsh-pet-0.6.4-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
 ```
 
 ### 自检
