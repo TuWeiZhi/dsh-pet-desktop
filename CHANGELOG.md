@@ -1,13 +1,15 @@
 # Changelog
 
-本仓库是 [`TuWeiZhi/dsh-pet`](https://github.com/TuWeiZhi/dsh-pet) 插件版的**独立桌面分支**：
-同一份 `assets/` `lib/` `runtime/` 内核，外面套一层 Electron 外壳，做成 Windows 独立安装包，不再需要 DSH。
-
-插件版自身的历史（0.4.0 – 0.4.4）见插件仓库的 CHANGELOG；本文件只记桌面分支。
+本仓库基于上游 [`PC2005-cloud/dsh-pet`](https://github.com/PC2005-cloud/dsh-pet)，将运行时改造为 Windows 独立安装包，不再需要 DSH。本文件记录桌面版的变更。
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
 ---
+
+## [0.6.3] —— 许可与署名说明（2026-11-04）
+
+- 补充上游素材非商业限制、角色形象作者署名与 CC BY-NC-SA 4.0 许可说明。
+- 安装包附带完整许可正文，项目介绍直接指向 PC2005-cloud/dsh-pet 上游。
 
 ## [0.6.2] —— 便签悬停防误触（2026-11-04）
 
