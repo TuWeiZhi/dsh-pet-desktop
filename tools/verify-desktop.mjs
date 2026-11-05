@@ -70,6 +70,8 @@ const mustExist = [
   'runtime/electron-helper/index.html',
   'runtime/electron-helper/note.js',
   'runtime/electron-helper/note-pages.js',
+  'runtime/electron-helper/note-film.js',
+  'runtime/electron-helper/note-media-data.js',
   'runtime/electron-helper/note.css',
   'runtime/electron-helper/note-saving.js',
   'runtime/electron-helper/note-storage.js',
@@ -77,6 +79,8 @@ const mustExist = [
   'runtime/electron-helper/desktop-updates.js',
   'assets/pic/note-holding-look-up.png',
   ...['拿出', '待机', '上一页', '下一页', '收起'].map(name => `assets/webm/便签-${name}.webm`),
+  ...['拿出', '待机', '上一页', '下一页', '收起'].map(name => `assets/note-video/${name}.webm`),
+  'assets/note-video/sources.json',
   'build/installer.nsh',
   'assets/config.jsonc',
   'assets/logo.png',
@@ -100,6 +104,7 @@ const syntaxTargets = [
   'runtime/electron-helper/preload.js',
 ];
 syntaxTargets.push('runtime/electron-helper/note.js', 'runtime/electron-helper/note-pages.js', 'runtime/electron-helper/note-saving.js',
+  'runtime/electron-helper/note-film.js', 'runtime/electron-helper/note-media-data.js',
   'runtime/electron-helper/note-storage.js', 'runtime/electron-helper/desktop-controls.js',
   'runtime/electron-helper/desktop-updates.js');
 for (const rel of syntaxTargets) {

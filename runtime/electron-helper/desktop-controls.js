@@ -10,6 +10,7 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
   setInterval: schedule = setInterval }) {
   const login = loginOptions({ isPackaged: app.isPackaged, execPath, appRoot });
   let phase = 'idle', percent = 0, release = null, installer = null, controller = null, checkFailed = false, updateFailed = false;
+  let hasChecked = false;
   const supported = platform === 'win32';
   const notify = () => onChange();
   const errorDialog = (message, error) => dialog.showMessageBox({ type: 'error', title: 'dsh-pet', message, detail: error.message || String(error), buttons: ['知道了'] });
@@ -57,6 +58,7 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
     phase = 'checking'; notify();
     try {
       release = await service.checkRelease(version);
+      hasChecked = true;
       checkFailed = false; updateFailed = false;
     } catch (error) {
       checkFailed = true;
@@ -102,6 +104,8 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
   function refresh(menu) {
     const startup = menu.getMenuItemById('launch-at-login');
     if (startup) startup.checked = loginEnabled();
+    const manual = menu.getMenuItemById('manual-check-updates');
+    if (manual) manual.enabled = supported && phase === 'idle';
     const update = menu.getMenuItemById('check-updates');
     if (update) {
       update.enabled = supported && (phase === 'ready' || (phase === 'idle' && (Boolean(release) || checkFailed)));
@@ -115,7 +119,7 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
           if (updateFailed) update.label = '更新失败，点击重试';
           else if (release) update.label = `点击更新（v${release.version}）`;
           else if (checkFailed) update.label = '检查更新失败，点击重试';
-          else update.label = `当前版本：v${version}`;
+          else update.label = `${hasChecked ? '已是最新版本' : '当前版本'}：v${version}`;
       }
     }
     const cancel = menu.getMenuItemById('cancel-update');
@@ -125,6 +129,7 @@ function createDesktopControls({ app, dialog, shell, version, appRoot, directory
   return {
     items: () => [
       { id: 'launch-at-login', label: '开机自启', type: 'checkbox', enabled: supported, checked: loginEnabled(), click: item => void setStartup(item) },
+      { id: 'manual-check-updates', label: '手动检查更新', enabled: supported, click: () => void check() },
       { id: 'check-updates', label: `当前版本：v${version}`, enabled: false, click: () => void update() },
       { id: 'cancel-update', label: '取消下载更新', visible: false, click: () => controller?.abort() },
     ],

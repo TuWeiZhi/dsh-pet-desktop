@@ -93,6 +93,113 @@ app.whenReady().then(async () => {
   const visible = () => run('sprites[0].note.isOpen');
   try {
     await load();
+    if (process.argv.includes('--film')) {
+      await run(`document.body.style.background='#e6edf3'; sprites[0].note.show(true)`);
+      for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      await run(`(() => {
+        const p = sprites[0], n = p.note;
+        n.text='今天要记住的五件事\\n10:00 参加团队例会\\n午休后整理项目笔记\\n下班顺路买一盒牛奶\\n晚上给阳台植物浇水\\n第二页的第一件事\\n继续保留原来的动作\\n文字仍然可以直接编辑\\n纸张与五行区域一致\\n翻页后内容不会丢失';
+        n.repaginate(0); n.clearTimers(); p.notePose.pause(); p.noteFilm.stop();
+      })()`);
+      const crop = await run(`(() => {
+        const p=sprites[0];
+        return {x:Math.round(p.margin.l+p.size/2-250), y:Math.round(p.margin.t+p.bottomPad-25), width:500, height:390};
+      })()`);
+      const frameDir = path.join(output, 'film-frames');
+      fs.mkdirSync(frameDir, {recursive:true});
+      // A decoded video frame does not mean capturePage's cached compositor
+      // snapshot is current. Wait for layout/paint, then use the paint image.
+      const captureFilmFrame = async () => {
+        await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        return new Promise((resolve, reject) => {
+          const painted = (_, dirty, image) => {
+            clearTimeout(timer);
+            resolve(image.crop(crop).toPNG());
+          };
+          const timer = setTimeout(() => {
+            win.webContents.removeListener('paint', painted);
+            reject(new Error('Timed out waiting for a fresh preview frame'));
+          }, 5000);
+          win.webContents.once('paint', painted);
+          win.webContents.invalidate();
+        });
+      };
+      const sourceClips = JSON.parse(fs.readFileSync(path.join(root, 'assets/note-video/sources.json'), 'utf8')).clips;
+      const playbackRates = await run('window.PetNoteMedia.playbackRates');
+      const previewFps = 24 * Math.max(...Object.values(playbackRates));
+      let repeatedFrames = 0;
+      let capturedFrames = 0;
+      let number = 0;
+      for (const [name, duration] of [['拿出'],['待机'],['下一页'],['待机',.8],['上一页'],['待机',.8],['收起']]) {
+        await run(`(async () => {
+          const p=sprites[0], v=p.notePose, n=p.note;
+          p.notePhase=${JSON.stringify(name === '待机' ? 'idle' : 'page')};
+          p.noteClipToken++; p.noteFilm.setClip(${JSON.stringify(name)});
+          v.pause(); v.onended=null; v.onerror=null; v.loop=false;
+          v.src='../../assets/note-video/'+encodeURIComponent(${JSON.stringify(name)})+'.webm';
+          await new Promise((resolve,reject)=>{v.requestVideoFrameCallback(resolve);v.addEventListener('error',reject,{once:true});v.load()});
+          p.noteFilm.stop();
+          n.el.style.visibility=${JSON.stringify(name === '待机' ? '' : 'hidden')};
+          if (${JSON.stringify(name)} === '下一页') n.page=1;
+          if (${JSON.stringify(name)} === '上一页') n.page=0;
+          n.renderPage();
+        })()`);
+        let previousFrame = null;
+        const count = duration ? Math.round(duration * 24) : sourceClips[name].frames;
+        for (let frame = 0; frame < count; frame++) {
+          // Sample within each frame, away from WebM's rounded millisecond PTS.
+          const t = (frame + .5) / 24;
+          await run(`(async () => {
+            const p=sprites[0],v=p.notePose;
+            // A queued video-frame callback can arrive before the new seek
+            // completes, leaving readyState < 2 and the canvas unchanged.
+            if (Math.abs(v.currentTime-${t})>.001) await new Promise(resolve=>{v.addEventListener('seeked',resolve,{once:true});v.currentTime=${t}});
+            if (v.readyState < 2 || v.seeking) throw new Error('Preview frame has not decoded');
+            p.noteFilm.draw(${t});
+            if (${JSON.stringify(name)}==='拿出' && ${t}>=3.5) p.revealNote();
+          })()`);
+          const png = await captureFilmFrame();
+          if (previousFrame && png.equals(previousFrame)) repeatedFrames++;
+          previousFrame = png;
+          capturedFrames++;
+          // 48 fps preserves every source frame at 2x. Original-speed clips
+          // hold each source frame for two output frames, keeping their timing.
+          for (let copy = 0; copy < previewFps / (24 * playbackRates[name]); copy++) {
+            fs.writeFileSync(path.join(frameDir, String(number++).padStart(4,'0')+'.png'), png);
+          }
+          if (number === 72) {
+            await run("document.body.style.background='#20252b'");
+            fs.writeFileSync(path.join(output,'dark-preview.png'), await captureFilmFrame());
+            await run("document.body.style.background='#e6edf3'");
+          }
+        }
+      }
+      assert.ok(repeatedFrames / capturedFrames < .02, 'preview must not encode cached screenshots: ' + repeatedFrames + '/' + capturedFrames);
+      console.log('Preview adjacent repeated source frames: ' + repeatedFrames + '/' + capturedFrames);
+      // Small pets must still have five readable rows on the same paper.
+      const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
+      await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:120})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
+      for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      assert.equal(await run('sprites[0].note.input.clientHeight'),90);
+      assert.equal(await run('sprites[0].note.el.offsetWidth'),257);
+      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgba(0, 0, 0, 0)');
+      assert.equal(await run('sprites[0].noteFilm.canvas.hidden'),false);
+      fs.writeFileSync(path.join(output,'small-pet.png'),(await win.webContents.capturePage()).toPNG());
+      const edgePixels = await run(`(() => {
+        const p=sprites[0], n=p.note, getLayout=n.getLayout;
+        n.getLayout=()=>({...getLayout(),bounds:{x:0,y:0,w:400,h:430}});
+        n.place(); p.noteFilm.draw(p.notePose.currentTime);
+        const card=n.el.getBoundingClientRect(), canvas=p.noteFilm.canvas;
+        const surface=canvas.getBoundingClientRect(), density=devicePixelRatio;
+        return [[card.left+12,card.top+20],[card.right-12,card.bottom-12]].map(([x,y])=>
+          Array.from(canvas.getContext('2d').getImageData(Math.round((x-surface.left)*density),Math.round((y-surface.top)*density),1,1).data));
+      })()`);
+      assert.ok(edgePixels.every(([r,g,b,a])=>r>150 && g>140 && b>120 && a>240), 'screen-edge text remains on the source paper: '+JSON.stringify(edgePixels));
+      fs.writeFileSync(path.join(output,'screen-edge.png'),(await win.webContents.capturePage()).toPNG());
+      console.log('PASS: supplied video preview and five-line small-pet layout');
+      console.log(`Frames: ${frameDir} (${number} at ${previewFps} fps)`);
+      app.exit(0); return;
+    }
     if (process.argv.includes('--pages') || process.argv.length === 2) {
       await hover();
       await run('sprites[0].note.show(true)');
@@ -165,12 +272,12 @@ app.whenReady().then(async () => {
         n.next.click(); n.next.click(); n.next.click();
       })()`);
       assert.equal(await run('sprites[0].note.page'), 1, 'rapid clicks do not jump ahead of the animation');
-      assert.equal(await run('sprites[0].notePose.playbackRate'), 4);
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
       await waitForNoteIdle();
       assert.equal(await run('sprites[0].note.page'), 3);
       assert.deepEqual(await run('window.noteTurnClips'), ['下一页', '下一页', '下一页']);
       const turnDurations = await run('window.noteTurnDurations');
-      assert.ok(turnDurations.every(ms => ms >= 800 && ms < 1500), 'page turns should take about one second including media load: ' + turnDurations);
+      assert.ok(turnDurations.every(ms => ms >= 1900 && ms < 2800), 'page turns take about two seconds at 2x: ' + turnDurations);
       console.log('Page-turn elapsed ms: ' + turnDurations.map(Math.round).join(', '));
       assert.equal(await run('getComputedStyle(sprites[0].note.input).visibility'), 'visible');
       assert.equal(await run('sprites[0].notePose.playbackRate'), 1);
@@ -179,7 +286,7 @@ app.whenReady().then(async () => {
       assert.equal(await run('sprites[0].note.page'), 1);
       assert.deepEqual(await run('window.noteTurnClips'), ['上一页', '上一页']);
       await run('window.noteTurnClips = []; sprites[0].note.next.click(); sprites[0].note.next.click(); sprites[0].note.close(); sprites[0].note.show(true)');
-      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 1);
       await waitForNoteIdle();
       assert.equal(await run('sprites[0].note.page'), 2, 'closing discards the queued page request');
       assert.deepEqual(await run('window.noteTurnClips'), ['下一页']);
@@ -191,7 +298,8 @@ app.whenReady().then(async () => {
       assert.equal(await run('sprites[0].notePhase'), null, 'a requested action cancels the closing animation');
       await delay(5500);
       assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
-      console.log('PASS: opening, five lines, unobscured fast page changes, rapid forward/back navigation, close/reopen and text preservation');
+      assert.equal(await run('sprites[0].noteFilm.canvas.hidden'), true, 'cancelled closing cannot resurrect the note surface');
+      console.log('PASS: original-speed opening, five lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
       console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
       app.exit(0); return;
     }

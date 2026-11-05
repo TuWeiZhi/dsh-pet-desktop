@@ -6,7 +6,8 @@ const path = require('node:path');
 const { PetNote } = require('../../runtime/electron-helper/note.js');
 const pages = require('../../runtime/electron-helper/note-pages.js');
 
-const context = { console, navigator: { platform: 'Win32' } };
+const context = { console, navigator: { platform: 'Win32' }, window: {} };
+vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../runtime/electron-helper/note-media-data.js'), 'utf8'), context);
 vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../runtime/electron-helper/sprite.js'), 'utf8') + '\nthis.PetSprite = PetSprite;', context);
 
 function noteFixture() {
@@ -81,11 +82,12 @@ test('closing cancels queued turns and invalidates the old completion', async ()
   assert.equal(clips.length, 1);
 });
 
-test('page turns use 4x speed while open/close stay at 2x and idle at 1x', () => {
+test('opening and idle stay at 1x while page turns and closing use 2x', () => {
   const pet = Object.create(context.PetSprite.prototype);
   pet.noteClipToken = 0;
+  pet.noteFilm = { setClip() {} };
   pet.notePose = { load() {}, play: () => Promise.resolve() };
-  for (const [name, speed] of [['拿出', 2], ['上一页', 4], ['下一页', 4], ['收起', 2], ['待机', 1]]) {
+  for (const [name, speed] of [['拿出', 1], ['上一页', 2], ['下一页', 2], ['收起', 2], ['待机', 1]]) {
     pet.playNoteClip(name, name === '待机');
     assert.equal(pet.notePose.playbackRate, speed);
   }
@@ -109,6 +111,7 @@ test('rapid clicks past a full final page create exactly one blank page', () => 
 test('a failed clip and rejected play promise finish the turn only once', async () => {
   const pet = Object.create(context.PetSprite.prototype);
   pet.noteClipToken = 0;
+  pet.noteFilm = { setClip() {} };
   pet.notePose = { load() {}, play: () => Promise.reject(new Error('unavailable')) };
   let completed = 0;
   pet.playNoteClip('下一页', false, () => completed++);

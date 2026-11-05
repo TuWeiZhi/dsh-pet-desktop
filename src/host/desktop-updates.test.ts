@@ -166,7 +166,7 @@ test('startup checks immediately, then every 24 hours without opening a dialog',
   assert.equal(fixture.dialogs.length,0);
   const update={};
   fixture.controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
-  assert.equal(update.label,'当前版本：v0.4.4');
+  assert.equal(update.label,'已是最新版本：v0.4.4');
   tick();
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(checks,2);
@@ -191,6 +191,64 @@ test('available update is shown in the tray and installation needs a separate cl
   assert.equal(dialogs.length,0);
 });
 
+test('manual checking remains available after an up-to-date result and can discover a later release', async () => {
+  let checks=0;
+  const fixture=controlsFixture([],{service:{checkRelease:async()=>{
+    checks++;
+    return checks < 3 ? null : selectRelease(release,'0.4.4');
+  }}});
+  const items=fixture.controls.items();
+  const menu={getMenuItemById:id=>items.find(item=>item.id===id)};
+  const manual=menu.getMenuItemById('manual-check-updates');
+  const status=menu.getMenuItemById('check-updates');
+  assert.equal(manual.label,'手动检查更新');
+  assert.equal(manual.enabled,true);
+  await fixture.controls.check(); // Initial background check found nothing.
+  fixture.controls.refresh(menu);
+  assert.equal(status.label,'已是最新版本：v0.4.4');
+  assert.equal(manual.enabled,true);
+  manual.click();
+  fixture.controls.refresh(menu);
+  assert.equal(manual.enabled,false);
+  assert.equal(status.label,'正在检查更新…');
+  await new Promise(resolve=>setImmediate(resolve));
+  fixture.controls.refresh(menu);
+  assert.equal(checks,2);
+  assert.equal(status.label,'已是最新版本：v0.4.4');
+  assert.equal(manual.enabled,true);
+  manual.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  fixture.controls.refresh(menu);
+  assert.equal(checks,3);
+  assert.match(status.label,/点击更新（v0\.5\.0）/);
+  assert.equal(manual.enabled,true);
+  assert.equal(status.enabled,true);
+  assert.deepEqual(fixture.calls,[],'manual checks never start downloading or installing');
+  assert.equal(fixture.dialogs.length,0);
+});
+
+test('manual checking reports failure and allows retry from the same menu entry', async () => {
+  let checks=0;
+  const fixture=controlsFixture([],{service:{checkRelease:async()=>{
+    if (++checks === 1) throw new Error('offline');
+    return null;
+  }}});
+  const items=fixture.controls.items();
+  const menu={getMenuItemById:id=>items.find(item=>item.id===id)};
+  const manual=menu.getMenuItemById('manual-check-updates');
+  manual.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  fixture.controls.refresh(menu);
+  assert.match(menu.getMenuItemById('check-updates').label,/检查更新失败/);
+  assert.equal(manual.enabled,true);
+  manual.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  fixture.controls.refresh(menu);
+  assert.equal(checks,2);
+  assert.equal(menu.getMenuItemById('check-updates').label,'已是最新版本：v0.4.4');
+  assert.equal(manual.enabled,true);
+});
+
 test('scheduled checks do not overlap an active check or download', async () => {
   let finishCheck, finishDownload, checks=0;
   const fixture=controlsFixture([],{service:{
@@ -198,15 +256,29 @@ test('scheduled checks do not overlap an active check or download', async () => 
     downloadRelease:()=>new Promise(resolve=>{finishDownload=resolve;}),
   }});
   const first=fixture.controls.check();
+  const items=fixture.controls.items();
+  const menu={getMenuItemById:id=>items.find(item=>item.id===id)};
+  const manual=menu.getMenuItemById('manual-check-updates');
+  fixture.controls.refresh(menu);
+  assert.equal(manual.enabled,false);
+  manual.click();
   await fixture.controls.check();
   assert.equal(checks,1);
   finishCheck(selectRelease(release,'0.4.4'));
   await first;
+  fixture.controls.refresh(menu);
+  assert.equal(manual.enabled,true);
   const download=fixture.controls.update();
+  fixture.controls.refresh(menu);
+  assert.equal(manual.enabled,false);
+  manual.click();
   await fixture.controls.check();
   assert.equal(checks,1);
   finishDownload('D:/cache/setup.exe');
   await download;
+  fixture.controls.refresh(menu);
+  assert.equal(manual.enabled,false,'a downloaded installer must keep its release metadata');
+  manual.click();
   await fixture.controls.check();
   assert.equal(checks,1);
 });
@@ -237,7 +309,7 @@ test('a failed background check is visible and can be retried', async () => {
   assert.equal(dialogs.length,0);
   await controls.update();
   controls.refresh({getMenuItemById:id=>id==='check-updates'?update:null});
-  assert.equal(update.label,'当前版本：v0.4.4');
+  assert.equal(update.label,'已是最新版本：v0.4.4');
 });
 
 test('download waits for a separate installation click and flushes before launch', async () => {

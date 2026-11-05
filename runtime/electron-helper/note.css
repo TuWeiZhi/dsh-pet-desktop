@@ -64,16 +64,17 @@
 .pet-note-text::placeholder { color: var(--note-muted); opacity: 1; }
 .pet-note-status { flex: none; color: var(--note-muted); font-size: 12px; }
 .pet-note-status.is-error { color: #a02828; }
-.pet-note-pose { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.pet-note-pose[hidden] { display: none; }
+.pet-note-pose { display: none; }
+.pet-note-film { position: absolute; left: -320px; top: -320px; pointer-events: none; }
+.pet-note-film[hidden] { display: none; }
 .pet-sprite.is-noting video.pet-video, .pet-sprite.is-noting .pet-bubble { visibility: hidden; }
 .pet-note[data-material='video'] {
   display: block;
   padding: 0;
-  border: 1px solid #756c68;
-  border-radius: 8px;
-  background: #e6dace;
-  box-shadow: inset 0 1px 1px #fff9;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   animation: none;
 }
 .pet-note[data-material='video'] .pet-note-text {
@@ -111,14 +112,21 @@
 .pet-note-prev:focus-visible, .pet-note-next:focus-visible { outline: 2px solid #425b80; }
 .pet-note-page { position: absolute; right: 9px; bottom: 3px; color: #655b5b; font: 11px/14px sans-serif; }
 .pet-note[data-material='video'] .pet-note-status { position: absolute; left: 10px; bottom: 3px; }
-.pet-note[data-material='video'].is-turning {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
+.pet-note[data-material='video'] .pet-note-text,
+.pet-note[data-material='video'] .pet-note-page {
+  opacity: 1;
+  transition: opacity 120ms ease-out;
 }
+.pet-note[data-material='video']:not(.is-readable) .pet-note-text,
+.pet-note[data-material='video']:not(.is-readable) .pet-note-page,
+.pet-note[data-material='video'].is-turning .pet-note-text,
+.pet-note[data-material='video'].is-turning .pet-note-page { opacity: 0; }
 .pet-note.is-turning .pet-note-text,
 .pet-note.is-turning .pet-note-page,
 .pet-note.is-turning .pet-note-status { visibility: hidden; }
-.pet-note-pose { object-fit: contain; }
 @keyframes note-raise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .pet-note { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .pet-note { animation: none; }
+  .pet-note[data-material='video'] .pet-note-text,
+  .pet-note[data-material='video'] .pet-note-page { transition: none; }
+}

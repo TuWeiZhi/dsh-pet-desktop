@@ -69,7 +69,7 @@ class PetSprite {
     // 小尺寸宠物也为固定大小的便签预留可见区域；余量仍然点击穿透。
     this.margin = {
       t: Math.max(m, 300, S.bubbleTopMarginOfPx(Math.max(bubbleFontPx, whisperFontPx), this.size)),
-      r: Math.max(m, 156), b: m, l: Math.max(m, 156),
+      r: Math.max(m, 156), b: Math.max(m, 160), l: Math.max(m, 156),
     };
     window.__dshPetDebug.winMargin = this.margin;
     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
@@ -257,6 +257,20 @@ class PetSprite {
     this.notePhase = null;
     this.noteClipToken = 0;
     stage.appendChild(this.notePose);
+    this.noteFilm = new window.PetNoteFilm(this.notePose, stage, this.size, () => {
+      const card = this.noteFilm.getCard();
+      return {
+        x: parseFloat(this.note.el.style.left) - this.margin.l - card.x,
+        y: parseFloat(this.note.el.style.top) - this.margin.t - this.bottomPad - card.y,
+      };
+    }, (clip, time) => {
+      this.el.classList.add('is-noting');
+      // The paper has settled before the source clip's final idle hold.
+      if (clip === '拿出' && time >= window.PetNoteMedia.readableAt && this.note.isOpen) {
+        this.notePhase = 'idle';
+        this.revealNote();
+      }
+    });
     stage.appendChild(this.hit);
     this.el.appendChild(this.bubble);
     this.el.appendChild(this.tip);
@@ -276,16 +290,19 @@ class PetSprite {
       id: JSON.stringify([this.assetRoot, this.pet.id]),
       name: this.pet.name,
       mount: document.body,
-      getLayout: () => ({
-        anchor: { x: this.margin.l + this.size * 0.5, y: this.margin.t + this.bottomPad + this.height * 0.39 },
-        bounds: this.visibleClampRect() || { x: 0, y: 0, w: innerWidth, h: innerHeight },
-        body: { x: this.margin.l + this.hitRect.x, y: this.margin.t + this.hitRect.y, w: this.hitRect.w },
-        card: this.assetRoot === 'main' ? {
-          x: this.margin.l + this.size / 2 - Math.max(250, this.size * 0.43) / 2,
-          y: this.margin.t + this.bottomPad + this.height * 0.68,
-          w: Math.max(250, this.size * 0.43), h: 130,
-        } : null,
-      }),
+      getLayout: () => {
+        const card = this.noteFilm.getCard();
+        return {
+          anchor: { x: this.margin.l + this.size * 0.5, y: this.margin.t + this.bottomPad + this.height * 0.39 },
+          bounds: this.visibleClampRect() || { x: 0, y: 0, w: innerWidth, h: innerHeight },
+          body: { x: this.margin.l + this.hitRect.x, y: this.margin.t + this.hitRect.y, w: this.hitRect.w },
+          card: this.assetRoot === 'main' ? {
+            ...card,
+            x: this.margin.l + card.x,
+            y: this.margin.t + this.bottomPad + card.y,
+          } : null,
+        };
+      },
       canOpen: () => !this.sleepPhase && !this.dragState.active && !this.throwRef && !this.posFollow && !this.frozen && !this.menuOpen && !this.chatOpen,
       onChange: (open) => {
         if (open) {
@@ -297,17 +314,14 @@ class PetSprite {
           if (open) {
             this.note.el.dataset.material = 'video';
             this.note.el.style.visibility = 'hidden';
+            this.note.el.classList.remove('is-readable');
             this.notePhase = 'opening';
-            this.el.classList.add('is-noting');
             const front = this.front === 0 ? this.videoA : this.videoB;
             front.pause();
             this.playNoteClip('拿出', false, () => {
               if (!this.note.isOpen) return;
               this.notePhase = 'idle';
-              this.note.el.style.visibility = '';
-              this.note.place();
-              this.note.repaginate();
-              if (this.note.pendingFocus) this.note.input.focus();
+              this.revealNote();
               this.playNoteClip('待机', true);
               this.syncInputRegions();
             });
@@ -316,6 +330,7 @@ class PetSprite {
             this.playNoteClip('收起', false, () => {
               this.notePhase = null;
               this.notePose.hidden = true;
+              this.noteFilm.hide();
               this.el.classList.remove('is-noting');
               if (this.sleepPhase || this.frozen) return;
               if (!this.resumeWorkStatusAnim() && this.animations.idle.length) this.playOnce(S.pick(this.animations.idle, this.anim));
@@ -406,6 +421,7 @@ class PetSprite {
     this.ac.abort();
     this.noteClipToken++;
     this.notePose.pause();
+    this.noteFilm.dispose();
     const saved = this.note.dispose();
     this.inputRegionMutation.disconnect();
     this.inputRegionResize.disconnect();
@@ -713,6 +729,16 @@ class PetSprite {
     this.switchTo(name, true, playbackId, url);
   }
 
+  revealNote() {
+    if (this.note.el.style.visibility !== 'hidden') return;
+    this.note.el.style.visibility = '';
+    this.note.el.classList.add('is-readable');
+    this.note.place();
+    this.note.repaginate();
+    if (this.note.pendingFocus) this.note.input.focus();
+    this.syncInputRegions();
+  }
+
   playNotePage(direction, done) {
     if (this.assetRoot !== 'main' || this.notePhase !== 'idle') { done(); return; }
     this.notePhase = 'page';
@@ -729,6 +755,7 @@ class PetSprite {
 
   playNoteClip(name, loop, onEnded) {
     const video = this.notePose;
+    this.noteFilm.setClip(name);
     const token = ++this.noteClipToken;
     let completed = false;
     const finish = () => {
@@ -744,10 +771,8 @@ class PetSprite {
       finish();
     };
     video.loop = loop;
-    video.defaultPlaybackRate = loop ? 1 : 2;
-    // 翻页素材约 4 秒，4 倍速保留约 1 秒的动作过程；开合保持 2 倍速。
-    if (name === '上一页' || name === '下一页') video.defaultPlaybackRate = 4;
-    video.src = '../../assets/webm/' + encodeURIComponent('便签-' + name) + '.webm';
+    video.defaultPlaybackRate = window.PetNoteMedia.playbackRates[name];
+    video.src = '../../assets/note-video/' + encodeURIComponent(name) + '.webm';
     video.load();
     video.playbackRate = video.defaultPlaybackRate;
     void video.play().catch(finish);
@@ -758,6 +783,7 @@ class PetSprite {
     this.noteClipToken++;
     this.notePose.pause();
     this.notePose.hidden = true;
+    this.noteFilm.hide();
     this.notePhase = null;
     this.el.classList.remove('is-noting');
   }
