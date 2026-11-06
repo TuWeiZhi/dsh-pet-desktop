@@ -15,7 +15,7 @@
   <img alt="based on PC2005-cloud/dsh-pet" src="https://img.shields.io/badge/based%20on-PC2005--cloud%2Fdsh--pet-informational">
 </p>
 
-> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.7.2-setup.exe`，双击安装即可。
+> **下载**：到 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载 `dsh-pet-0.7.3-setup.exe`，双击安装即可。
 > 安装包自带 Electron 运行时，安装时无需额外下载运行环境；`%APPDATA%\dsh-pet` 存配置，卸载默认保留。
 
 本仓库发布独立桌面版；上游插件与素材制作说明请参见 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。安装后的许可文件位于安装目录的 `resources/app/`。
@@ -29,15 +29,15 @@
 从 [Releases](https://github.com/TuWeiZhi/dsh-pet-desktop/releases/latest) 下载：
 
 ```
-dsh-pet-0.7.2-setup.exe           # Windows x64 安装程序
-dsh-pet-0.7.2-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
+dsh-pet-0.7.3-setup.exe           # Windows x64 安装程序
+dsh-pet-0.7.3-setup.exe.blockmap  # 发布附带的增量信息；当前应用内更新下载完整安装包
 update-manifest.json             # 更新检查备用路径所需的安装包大小和 SHA-256
 ```
 
 自己构建的产物落在 `dist\`（该目录不入库）：
 
 ```
-dist\dsh-pet-0.7.2-setup.exe
+dist\dsh-pet-0.7.3-setup.exe
 dist\win-unpacked\                # 免安装目录，调试用
 ```
 
@@ -54,9 +54,9 @@ dist\win-unpacked\                # 免安装目录，调试用
 | 开机自启 | 勾选后在 Windows 登录时启动；默认不开启，可取消；卸载时清理本应用的启动项 |
 | 手动检查更新与更新状态 | 启动时及运行期间每 24 小时检查 GitHub Releases，也可随时在空闲时点击「手动检查更新」。检查后显示「已是最新版本」或可下载的新版本；点击「点击更新」下载 Windows 安装包并校验 SHA-256。下载可取消，完成后点击「点击安装」保存便签并启动安装；检查或更新失败时可点击重试 |
 | 宠物右键 → 首项 | **AI 设置**（独立版没有 `dsh://` 协议，所以不是"打开软件"） |
-| 鼠标悬停宠物 | 约 1 秒后播放从身后拿出便签的动画，纸面稳定后可以编辑；便签随人物等比例缩放，文字字号固定；拿出与待机保持原速，上下翻页及收起使用 2 倍速 |
+| 鼠标悬停宠物 | 约 1 秒后播放从身后拿出便签的动画，纸面稳定后可以编辑；便签和文字随人物等比例缩放；拿出与待机保持原速，上下翻页及收起使用 2 倍速 |
 | 宠物右键 → 睡觉 | 内置宠物播放入睡和循环睡姿；点击宠物或右键「起来」唤醒，睡姿循环时播放起身后恢复动作，入睡过程中唤醒则直接恢复。睡眠仅在当前桌宠窗口有效，重载后恢复清醒；睡眠期间暂停展示自动气泡与动作，暂不支持上游梦话和宿主级睡眠接口 |
-| 便签编辑 | 在手持纸张上直接编辑，不展开独立便签；按纸面实际高度自动计算每页行数，文字保持 12px 字号、16px 行高。纸张下沿切换上一页、下一页并显示页码；末页写满后可进入新页。编辑自动保存，收起、重载和正常退出前提交剩余草稿；鼠标离开约 0.45 秒后收起，中文组词期间等待选词结束；支持 `Esc` 收起和右键「便签」打开 |
+| 便签编辑 | 在手持纸张上直接编辑，不展开独立便签；每页三行占满可写区域，文字字号、行高和留白都随纸张等比例缩放。纸张下沿切换上一页、下一页并显示页码；末页写满后可进入新页。编辑自动保存，收起、重载和正常退出前提交剩余草稿；鼠标离开约 0.45 秒后收起，中文组词期间等待选词结束；支持 `Esc` 收起和右键「便签」打开 |
 | 宠物右键其他项 | 碎碎念、对话、回到初始位置、重放动画、更换形象、更多、重载配置（**没有「查看余额」「显示位置」**）；睡眠时先唤醒再使用互动项 |
 | 退出桌宠 | 走 `POST /shutdown` 优雅收尾，不留后台进程 |
 | 卸载 | 控制面板「dsh-pet 桌面宠物」；`%APPDATA%\dsh-pet` 默认保留 |
@@ -176,12 +176,12 @@ npm run pack
 npm run dist
 ```
 
-产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.7.2-setup.exe`。
+产物：`dist\win-unpacked\`（免安装目录）与 `dist\dsh-pet-0.7.3-setup.exe`。
 
 ### 静默安装（脚本/自动化用）
 
 ```powershell
-Start-Process dist\dsh-pet-0.7.2-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
+Start-Process dist\dsh-pet-0.7.3-setup.exe -ArgumentList "/S","/D=C:\path\to\install" -Wait
 ```
 
 ### 自检

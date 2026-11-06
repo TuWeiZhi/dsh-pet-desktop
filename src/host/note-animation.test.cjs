@@ -174,6 +174,7 @@ test('repagination measures complete rows and retains the reading position as pa
   delete note.repaginate;
   note.text = Array.from({ length: 30 }, () => 'x').join('\n');
   note.input.clientWidth = 100;
+  note.el.dataset = { material: 'glass' };
   let height = 17;
   note.input.getBoundingClientRect = () => ({ height });
   note.measureContext = { measureText: () => ({ width: 1 }) };
@@ -196,6 +197,13 @@ test('repagination measures complete rows and retains the reading position as pa
     height = 17;
     note.repaginate();
     assert.equal(note.pages[note.page].start, position);
+    note.el.dataset.material = 'video';
+    for (const pixels of [17, 60, 100, 180]) {
+      height = pixels;
+      note.repaginate(0);
+      assert.equal(note.pageLines, 3, 'video paper always has three proportional rows');
+      assert.equal(note.pages[0].lines, 3);
+    }
   } finally {
     delete global.window; delete global.document; delete global.getComputedStyle;
   }

@@ -69,6 +69,7 @@
 .pet-note-film[hidden] { display: none; }
 .pet-sprite.is-noting video.pet-video, .pet-sprite.is-noting .pet-bubble { visibility: hidden; }
 .pet-note[data-material='video'] {
+  container-type: size;
   display: block;
   padding: 0;
   border: 0;
@@ -79,17 +80,18 @@
 }
 .pet-note[data-material='video'] .pet-note-text {
   position: absolute;
-  left: 6px;
-  top: 6px;
-  width: calc(100% - 12px);
-  height: calc(100% - 12px);
+  left: 4%;
+  top: 5%;
+  width: 92%;
+  height: 90%;
   padding: 0;
   border: 0;
   resize: none;
   overflow: hidden;
   background: transparent;
   color: #332d32;
-  font: 12px/16px 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  /* Three equal rows fill the paper; glyphs and margins scale with it. */
+  font: 23cqh/30cqh 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
   overflow-wrap: anywhere;
   word-break: break-all;
   tab-size: 4;

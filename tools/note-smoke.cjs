@@ -159,25 +159,28 @@ app.whenReady().then(async () => {
       const spread = [0,1,2].map(c => Math.max(...colors.map(rgb=>rgb[c]))-Math.min(...colors.map(rgb=>rgb[c])));
       assert.ok(spread.every(value=>value<=4), 'all clips must share the writing-paper palette; RGB spread: '+spread);
       const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
-      for (const [size, capacity] of [[120,1], [300,3], [462,6], [800,11]]) {
+      for (const size of [120, 300, 462, 800]) {
+        const capacity = 3;
         const previewWidth = Math.max(924, size * 2);
         win.setSize(previewWidth, Math.max(780, Math.ceil(size * 1.5 + 300)));
         await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:${size}})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
         for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
         const layout = await run(`(() => {
           const p=sprites[0], n=p.note;
-          n.text=Array.from({length:n.pageLines},(_,i)=>'记'+(i+1)).join('\\n'); n.repaginate(0); n.clearTimers();
-          return {scale:p.noteFilm.scale(), lines:n.pageLines, fontSize:getComputedStyle(n.input).fontSize,
+          n.text='今天完成工作\\n下班记得买菜\\n晚上早点休息'; n.repaginate(0); n.clearTimers();
+          const style=getComputedStyle(n.input);
+          return {scale:p.noteFilm.scale(), lines:n.pageLines, fontSize:parseFloat(style.fontSize), lineHeight:parseFloat(style.lineHeight),
             height:n.input.clientHeight, scroll:n.input.scrollHeight, background:getComputedStyle(n.el).backgroundColor,
             card:n.el.getBoundingClientRect().toJSON(), paper:p.noteFilm.getCard(),
             input:n.input.getBoundingClientRect().toJSON(), controls:n.controls.getBoundingClientRect().toJSON()};
         })()`);
         assert.equal(layout.scale, size/640, 'note animations never enlarge the character');
-        assert.equal(layout.lines, capacity, 'line capacity follows the actual paper height');
-        assert.equal(layout.fontSize, '12px', 'text size stays fixed');
+        assert.equal(layout.lines, capacity, 'every pet size has three writing rows');
+        assert.ok(Math.abs(layout.fontSize/layout.card.height-.23)<.001, 'font size scales in proportion to the paper');
+        assert.ok(Math.abs(layout.lineHeight*3/layout.card.height-.9)<.002, 'three rows fill the writing area');
         assert.equal(layout.background, 'rgba(0, 0, 0, 0)');
         assert.ok(Math.abs(layout.card.width-layout.paper.w)<.05 && Math.abs(layout.card.height-layout.paper.h)<.05, 'the editor stays on the proportional source paper');
-        assert.ok(layout.scroll<=layout.height+1, 'all visible text rows fit');
+        assert.ok(layout.scroll<=layout.height+1, 'all three text rows fit');
         assert.ok(layout.input.top>=layout.card.top && layout.input.bottom<=layout.card.bottom, 'writing stays inside the paper');
         assert.ok(layout.controls.top>=layout.card.bottom-.05, 'navigation does not consume writing rows');
         assert.ok(layout.card.x>=0 && layout.card.right<=previewWidth, 'editor remains on screen');
@@ -200,9 +203,9 @@ app.whenReady().then(async () => {
         await delay(100);
         assert.equal(await run('sprites[0].note.page'),1,'native footer click creates the next page');
         assert.equal(await run('sprites[0].note.next.disabled'),true,'a blank single-row page cannot generate extra blank pages');
-        console.log('Size '+size+': '+capacity+' rows at 12px, proportional paper and native footer click passed');
+        console.log('Size '+size+': 3 rows at '+layout.fontSize.toFixed(2)+'px, proportional text and native footer click passed');
       }
-      console.log('PASS: consistent paper color, proportional paper, fixed font and adaptive row capacities');
+      console.log('PASS: consistent paper color, proportional paper and text, three full writing rows');
       app.exit(0); return;
     }
     if (process.argv.includes('--film')) {
@@ -288,11 +291,11 @@ app.whenReady().then(async () => {
       }
       assert.ok(repeatedFrames / capturedFrames < .02, 'preview must not encode cached screenshots: ' + repeatedFrames + '/' + capturedFrames);
       console.log('Preview adjacent repeated source frames: ' + repeatedFrames + '/' + capturedFrames);
-      // Small pets retain proportional paper and a fixed font with fewer rows.
+      // Small pets scale both paper and text, retaining three rows.
       const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
       await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:120})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
-      assert.equal(await run('sprites[0].note.pageLines'),1);
+      assert.equal(await run('sprites[0].note.pageLines'),3);
       assert.equal(await run('sprites[0].note.el.offsetWidth'),57);
       assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgba(0, 0, 0, 0)');
       assert.equal(await run('sprites[0].noteFilm.scale()'),120/640);
@@ -414,7 +417,7 @@ app.whenReady().then(async () => {
       await delay(5500);
       assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
       assert.equal(await run('sprites[0].noteFilm.canvas.hidden'), true, 'cancelled closing cannot resurrect the note surface');
-      console.log('PASS: original-speed opening, adaptive lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
+      console.log('PASS: original-speed opening, three proportional lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
       console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
       app.exit(0); return;
     }
