@@ -53,7 +53,6 @@ class PetNoteFilm {
       y: paper.y * scale,
       w: paper.w * scale,
       h: paper.h * scale,
-      detached: paper.h * scale < 110,
     };
   }
 

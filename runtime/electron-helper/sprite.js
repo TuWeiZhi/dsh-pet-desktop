@@ -66,7 +66,7 @@ class PetSprite {
     this.actionGapTimer = null; // 到点回来掷骰的定时器
     const bubbleFontPx = S.resolveFontPx(fontConf, this.size).bubble;
     const whisperFontPx = bubbleFontPx * WHISPER_FONT_RATIO * this.whisperScale;
-    // 小尺寸宠物也为固定大小的便签预留可见区域；余量仍然点击穿透。
+    // 小尺寸宠物也为便签动画与翻页控件预留可见区域；余量仍然点击穿透。
     this.margin = {
       t: Math.max(m, 300, S.bubbleTopMarginOfPx(Math.max(bubbleFontPx, whisperFontPx), this.size)),
       r: Math.max(m, 156), b: Math.max(m, 160), l: Math.max(m, 156),
@@ -259,7 +259,6 @@ class PetSprite {
     stage.appendChild(this.notePose);
     this.noteFilm = new window.PetNoteFilm(this.notePose, stage, this.size, () => {
       const card = this.noteFilm.getCard();
-      if (card.detached) return { x: 0, y: 0 };
       return {
         x: parseFloat(this.note.el.style.left) - this.margin.l - card.x,
         y: parseFloat(this.note.el.style.top) - this.margin.t - this.bottomPad - card.y,
@@ -1756,7 +1755,7 @@ class PetSprite {
     const rects = [];
     // 控件矩形 = 主进程允许接收点击的区域（矩形外的余量区继续穿透）。
     // .pet-bubble.is-clickable 是余额气泡的展开态：它悬在宠物头顶的余量区，不登记就点不到。
-    const controls = [...document.querySelectorAll('.dsh-pet-menu-column, .dsh-pet-chat, .pet-sprite:not(.is-noting) .pet-bubble.is-clickable, .pet-note:not([hidden])')];
+    const controls = [...document.querySelectorAll('.dsh-pet-menu-column, .dsh-pet-chat, .pet-sprite:not(.is-noting) .pet-bubble.is-clickable, .pet-note:not([hidden]), .pet-note:not([hidden]) .pet-note-controls')];
     for (const el of this.inputRegionElements) {
       if (!controls.includes(el)) {
         this.inputRegionResize.unobserve(el);

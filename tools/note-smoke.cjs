@@ -159,24 +159,50 @@ app.whenReady().then(async () => {
       const spread = [0,1,2].map(c => Math.max(...colors.map(rgb=>rgb[c]))-Math.min(...colors.map(rgb=>rgb[c])));
       assert.ok(spread.every(value=>value<=4), 'all clips must share the writing-paper palette; RGB spread: '+spread);
       const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
-      for (const size of [120, 300, 462]) {
+      for (const [size, capacity] of [[120,1], [300,3], [462,6], [800,11]]) {
+        const previewWidth = Math.max(924, size * 2);
+        win.setSize(previewWidth, Math.max(780, Math.ceil(size * 1.5 + 300)));
         await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:${size}})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
         for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
         const layout = await run(`(() => {
           const p=sprites[0], n=p.note;
-          n.text='第一行\\n第二行\\n第三行\\n第四行\\n第五行'; n.repaginate(0); n.clearTimers();
-          return {scale:p.noteFilm.scale(), detached:n.el.dataset.detached,
-            height:n.input.clientHeight, scroll:n.input.scrollHeight,
-            card:n.el.getBoundingClientRect().toJSON(), paper:p.noteFilm.getCard()};
+          n.text=Array.from({length:n.pageLines},(_,i)=>'记'+(i+1)).join('\\n'); n.repaginate(0); n.clearTimers();
+          return {scale:p.noteFilm.scale(), lines:n.pageLines, fontSize:getComputedStyle(n.input).fontSize,
+            height:n.input.clientHeight, scroll:n.input.scrollHeight, background:getComputedStyle(n.el).backgroundColor,
+            card:n.el.getBoundingClientRect().toJSON(), paper:p.noteFilm.getCard(),
+            input:n.input.getBoundingClientRect().toJSON(), controls:n.controls.getBoundingClientRect().toJSON()};
         })()`);
         assert.equal(layout.scale, size/640, 'note animations never enlarge the character');
-        assert.equal(layout.detached, String(size<462));
-        assert.ok(layout.scroll<=layout.height+1, 'all five lines fit');
-        assert.ok(layout.card.x>=0 && layout.card.right<=924, 'editor remains on screen');
+        assert.equal(layout.lines, capacity, 'line capacity follows the actual paper height');
+        assert.equal(layout.fontSize, '12px', 'text size stays fixed');
+        assert.equal(layout.background, 'rgba(0, 0, 0, 0)');
+        assert.ok(Math.abs(layout.card.width-layout.paper.w)<.05 && Math.abs(layout.card.height-layout.paper.h)<.05, 'the editor stays on the proportional source paper');
+        assert.ok(layout.scroll<=layout.height+1, 'all visible text rows fit');
+        assert.ok(layout.input.top>=layout.card.top && layout.input.bottom<=layout.card.bottom, 'writing stays inside the paper');
+        assert.ok(layout.controls.top>=layout.card.bottom-.05, 'navigation does not consume writing rows');
+        assert.ok(layout.card.x>=0 && layout.card.right<=previewWidth, 'editor remains on screen');
         await delay(100);
         fs.writeFileSync(path.join(output, 'size-'+size+'.png'), (await win.webContents.capturePage()).toPNG());
+        if (size === 462) {
+          await run("document.body.style.background='#20252b'");
+          await delay(100);
+          fs.writeFileSync(path.join(output, 'dark-paper.png'), (await win.webContents.capturePage()).toPNG());
+          await run("document.body.style.background='#e6edf3'");
+        }
+        const button = await box('.pet-note-next');
+        const x = button.x+button.width/2, y = button.y+button.height/2;
+        await move(x,y);
+        await delay(500);
+        assert.equal(await visible(),true,'hovering footer navigation keeps the paper open');
+        assert.ok(regions.rects.some(r=>x>=r.x && x<=r.x+r.width && y>=r.y && y<=r.y+r.height), 'footer buttons are registered for native input');
+        win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:Math.round(x),y:Math.round(y)});
+        win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:Math.round(x),y:Math.round(y)});
+        await delay(100);
+        assert.equal(await run('sprites[0].note.page'),1,'native footer click creates the next page');
+        assert.equal(await run('sprites[0].note.next.disabled'),true,'a blank single-row page cannot generate extra blank pages');
+        console.log('Size '+size+': '+capacity+' rows at 12px, proportional paper and native footer click passed');
       }
-      console.log('PASS: consistent paper color, unchanged pet scale, five-line inline and detached editors');
+      console.log('PASS: consistent paper color, proportional paper, fixed font and adaptive row capacities');
       app.exit(0); return;
     }
     if (process.argv.includes('--film')) {
@@ -184,7 +210,7 @@ app.whenReady().then(async () => {
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
       await run(`(() => {
         const p = sprites[0], n = p.note;
-        n.text='今天要记住的五件事\\n10:00 参加团队例会\\n午休后整理项目笔记\\n下班顺路买一盒牛奶\\n晚上给阳台植物浇水\\n第二页的第一件事\\n继续保留原来的动作\\n文字仍然可以直接编辑\\n纸张与五行区域一致\\n翻页后内容不会丢失';
+        n.text='今天要记住的事\\n10:00 参加团队例会\\n午休后整理项目笔记\\n下班顺路买一盒牛奶\\n晚上给阳台植物浇水\\n第二页的第一件事\\n继续保留原来的动作\\n文字仍然可以直接编辑\\n纸张与文字区域一致\\n翻页后内容不会丢失';
         n.repaginate(0); n.clearTimers(); p.notePose.pause(); p.noteFilm.stop();
       })()`);
       const crop = await run(`(() => {
@@ -262,13 +288,13 @@ app.whenReady().then(async () => {
       }
       assert.ok(repeatedFrames / capturedFrames < .02, 'preview must not encode cached screenshots: ' + repeatedFrames + '/' + capturedFrames);
       console.log('Preview adjacent repeated source frames: ' + repeatedFrames + '/' + capturedFrames);
-      // Small pets use a readable detached editor without enlarging the character.
+      // Small pets retain proportional paper and a fixed font with fewer rows.
       const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
       await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:120})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
-      assert.equal(await run('sprites[0].note.input.clientHeight'),80);
-      assert.equal(await run('sprites[0].note.el.offsetWidth'),260);
-      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgb(235, 218, 208)');
+      assert.equal(await run('sprites[0].note.pageLines'),1);
+      assert.equal(await run('sprites[0].note.el.offsetWidth'),57);
+      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgba(0, 0, 0, 0)');
       assert.equal(await run('sprites[0].noteFilm.scale()'),120/640);
       assert.equal(await run('sprites[0].noteFilm.canvas.hidden'),false);
       fs.writeFileSync(path.join(output,'small-pet.png'),(await win.webContents.capturePage()).toPNG());
@@ -284,7 +310,7 @@ app.whenReady().then(async () => {
       })()`);
       assert.ok(edgePixels.every(([r,g,b,a])=>r>150 && g>140 && b>120 && a>240), 'screen-edge text remains on the source paper: '+JSON.stringify(edgePixels));
       fs.writeFileSync(path.join(output,'screen-edge.png'),(await win.webContents.capturePage()).toPNG());
-      console.log('PASS: supplied video preview and five-line small-pet layout');
+      console.log('PASS: supplied video preview and proportional small-pet paper');
       console.log(`Frames: ${frameDir} (${number} at ${previewFps} fps)`);
       app.exit(0); return;
     }
@@ -295,7 +321,8 @@ app.whenReady().then(async () => {
       assert.equal(await run('sprites[0].notePhase'), 'idle', 'opening reaches the idle pose');
       assert.equal(await run('sprites[0].note.el.style.visibility'), '', 'editor is visible');
       assert.equal(await run('document.activeElement === sprites[0].note.input'), true, 'keyboard opening focuses after the animation');
-      await run(`sprites[0].note.input.value=${JSON.stringify('一\n二\n三\n四\n五')}; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
+      const firstPage = await run(`Array.from({length:sprites[0].note.pageLines},(_,i)=>String(i+1)).join('\\n')`);
+      await run(`sprites[0].note.input.value=${JSON.stringify(firstPage)}; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
       assert.equal(await run('sprites[0].note.next.disabled'), false);
       await run('sprites[0].note.next.click()');
       assert.equal(await run('sprites[0].note.pageNumber.textContent'), '2');
@@ -305,22 +332,22 @@ app.whenReady().then(async () => {
       assert.equal(await run('getComputedStyle(sprites[0].note.prev).visibility'), 'visible', 'navigation stays available during the turn');
       await run(`sprites[0].note.input.value='第二页'; sprites[0].note.input.dispatchEvent(new Event('input',{bubbles:true}))`);
       await run('sprites[0].note.flush()');
-      assert.equal(await noteStore.read(await run('sprites[0].note.id')), '一\n二\n三\n四\n五\n第二页');
+      assert.equal(await noteStore.read(await run('sprites[0].note.id')), firstPage+'\n第二页');
       await run(`sprites[0].note.input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));sprites[0].note.input.value='第二页和组词';`);
       await run('sprites[0].note.flush()');
       await run(`sprites[0].note.input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))`);
       await run('sprites[0].note.flush()');
-      assert.equal(await noteStore.read(await run('sprites[0].note.id')), '一\n二\n三\n四\n五\n第二页和组词');
+      assert.equal(await noteStore.read(await run('sprites[0].note.id')), firstPage+'\n第二页和组词');
       for (let i=0; i<100 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
       await run('sprites[0].note.prev.click()');
       assert.equal(await run('sprites[0].note.pageNumber.textContent'), '1');
-      assert.equal(await run('sprites[0].note.input.value'), '一\n二\n三\n四\n五\n');
+      assert.equal(await run('sprites[0].note.input.value'), firstPage+'\n');
       assert.equal(await run('sprites[0].note.isOpen && !sprites[0].note.el.hidden'), true, 'note remains visible during page changes');
       win.webContents.invalidate();
       await delay(250);
       fs.writeFileSync(path.join(output, 'pages-preview.png'), (await win.webContents.capturePage({stayHidden:true,stayAwake:true})).toPNG());
       await load();
-      assert.equal(await run('sprites[0].note.text'), '一\n二\n三\n四\n五\n第二页和组词', 'saved text survives reload');
+      assert.equal(await run('sprites[0].note.text'), firstPage+'\n第二页和组词', 'saved text survives reload');
       await run('sprites[0].note.show()');
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
       const layoutCheck = await run(`(() => {
@@ -335,7 +362,7 @@ app.whenReady().then(async () => {
         });
       })()`);
       assert.equal(layoutCheck[0].text, '连续中文与English text 12345 '.repeat(40));
-      assert.ok(layoutCheck.every(item => item.lengths.every(([scroll, client]) => scroll <= client + 1)), 'each page fits within five displayed rows: '+JSON.stringify(layoutCheck));
+      assert.ok(layoutCheck.every(item => item.lengths.every(([scroll, client]) => scroll <= client + 1)), 'each page fits within the measured writing area: '+JSON.stringify(layoutCheck));
       const waitForNoteIdle = async () => {
         for (let i=0; i<150 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
         assert.equal(await run('sprites[0].notePhase'), 'idle');
@@ -343,7 +370,7 @@ app.whenReady().then(async () => {
       };
       await run(`(() => {
         const pet = sprites[0], n = pet.note;
-        n.text = Array.from({length:21}, (_, i) => 'line ' + i).join('\\n');
+        n.text = Array.from({length:n.pageLines*4+1}, (_, i) => 'line ' + i).join('\\n');
         n.repaginate(0);
         window.noteTurnClips = [];
         window.noteTurnDurations = [];
@@ -387,7 +414,7 @@ app.whenReady().then(async () => {
       await delay(5500);
       assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
       assert.equal(await run('sprites[0].noteFilm.canvas.hidden'), true, 'cancelled closing cannot resurrect the note surface');
-      console.log('PASS: original-speed opening, five lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
+      console.log('PASS: original-speed opening, adaptive lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
       console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
       app.exit(0); return;
     }

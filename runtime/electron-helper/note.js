@@ -37,6 +37,7 @@ class PetNote {
     this.pageTurning = false;
     this.pageTurnToken = 0;
     this.pageWidth = 1;
+    this.pageLines = 1;
     this.canvas = document.createElement('canvas');
     this.measureContext = this.canvas.getContext('2d');
     this.isOpen = false;
@@ -78,7 +79,10 @@ class PetNote {
     this.status.className = 'pet-note-status';
     this.status.hidden = true;
     this.status.setAttribute('role', 'status');
-    this.el.append(this.input, this.prev, this.next, this.pageNumber, this.status);
+    this.controls = document.createElement('div');
+    this.controls.className = 'pet-note-controls';
+    this.controls.append(this.prev, this.pageNumber, this.next, this.status);
+    this.el.append(this.input, this.controls);
     mount.appendChild(this.el);
     this.loaded = false;
     this.exiting = false;
@@ -146,10 +150,15 @@ class PetNote {
   }
 
   repaginate(offset = null) {
+    const position = offset ?? (this.pages[this.page].start +
+      (document.activeElement === this.input ? this.input.selectionStart : 0));
     const style = getComputedStyle(this.input);
     this.measureContext.font = style.font;
     const available = this.input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     if (available > 0) this.pageWidth = available;
+    const height = this.input.getBoundingClientRect().height - parseFloat(style.paddingTop) -
+      parseFloat(style.paddingBottom) - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
+    if (height > 0) this.pageLines = Math.max(1, Math.floor(height / parseFloat(style.lineHeight)));
     const widths = new Map();
     const measure = (part, used = 0) => {
       if (part === '\t') {
@@ -159,9 +168,9 @@ class PetNote {
       if (!widths.has(part)) widths.set(part, this.measureContext.measureText(part).width);
       return widths.get(part);
     };
-    this.pages = window.PetNotePages.paginate(this.text, this.pageWidth, measure);
-    this.page = offset === null ? Math.min(this.page, this.pages.length - 1) : window.PetNotePages.pageAt(this.pages, offset);
-    this.renderPage(offset);
+    this.pages = window.PetNotePages.paginate(this.text, this.pageWidth, measure, this.pageLines);
+    this.page = window.PetNotePages.pageAt(this.pages, position);
+    this.renderPage(position);
   }
 
   renderPage(offset = null) {
@@ -169,7 +178,8 @@ class PetNote {
     const value = this.text.slice(range.start, range.end);
     if (this.input.value !== value) this.input.value = value;
     const target = this.pageTurning ? this.targetPage : this.page;
-    const last = this.pages.length - 1 + (this.pages.at(-1).lines === 5 ? 1 : 0);
+    const tail = this.pages.at(-1);
+    const last = this.pages.length - 1 + (tail.lines === this.pageLines && tail.end > tail.start ? 1 : 0);
     this.prev.disabled = target === 0;
     this.next.disabled = target >= last;
     this.pageNumber.textContent = String(this.page + 1);
@@ -201,7 +211,8 @@ class PetNote {
   changePage(direction) {
     if (!this.loaded || this.composing || !this.isOpen) return;
     const current = this.pageTurning ? this.targetPage : this.page;
-    const last = this.pages.length - 1 + (this.pages.at(-1).lines === 5 ? 1 : 0);
+    const tail = this.pages.at(-1);
+    const last = this.pages.length - 1 + (tail.lines === this.pageLines && tail.end > tail.start ? 1 : 0);
     this.targetPage = Math.max(0, Math.min(last, current + direction));
     if (this.pageTurning) {
       this.renderPage();
@@ -313,37 +324,22 @@ class PetNote {
 
   containsPoint(x, y) {
     if (!this.isOpen) return false;
-    const rect = this.el.getBoundingClientRect();
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    return [this.el, this.controls].some(el => {
+      const rect = el.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    });
   }
 
   place() {
     if (!this.isOpen) return;
     const { anchor, bounds, body, card } = this.getLayout();
-    let p = card ? {
+    const extraWidth = card ? Math.max(0, this.controls.offsetWidth - card.w) / 2 : 0;
+    const controlsHeight = card ? this.controls.offsetHeight : 0;
+    const p = card ? {
       ...card,
-      x: Math.max(bounds.x, Math.min(card.x, bounds.x + bounds.w - card.w)),
-      y: Math.max(bounds.y, Math.min(card.y, bounds.y + bounds.h - card.h)),
+      x: Math.max(bounds.x + extraWidth, Math.min(card.x, bounds.x + bounds.w - card.w - extraWidth)),
+      y: Math.max(bounds.y, Math.min(card.y, bounds.y + bounds.h - card.h - controlsHeight)),
     } : notePlacement(anchor, bounds, body);
-    this.el.dataset.detached = String(Boolean(card?.detached));
-    if (card?.detached) {
-      const w = Math.min(260, bounds.w);
-      const h = Math.min(130, bounds.h);
-      const right = card.x + card.w + 12;
-      const left = card.x - w - 12;
-      let x = right;
-      let y = card.y;
-      if (right + w > bounds.x + bounds.w) {
-        x = left;
-        if (left < bounds.x) {
-          x = card.x + (card.w - w) / 2;
-          y = card.y + card.h + 12;
-          if (y + h > bounds.y + bounds.h) y = (body?.y ?? card.y) - h - 12;
-        }
-      }
-      p = { x: Math.max(bounds.x, Math.min(x, bounds.x + bounds.w - w)),
-        y: Math.max(bounds.y, Math.min(y, bounds.y + bounds.h - h)), w, h };
-    }
     Object.assign(this.el.style, { left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' });
   }
 

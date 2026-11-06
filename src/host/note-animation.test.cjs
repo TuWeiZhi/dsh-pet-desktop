@@ -10,25 +10,25 @@ const context = { console, navigator: { platform: 'Win32' }, window: {} };
 vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../runtime/electron-helper/note-media-data.js'), 'utf8'), context);
 vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../runtime/electron-helper/sprite.js'), 'utf8') + '\nthis.PetSprite = PetSprite;', context);
 
-function noteFixture() {
+function noteFixture(pageLines = 5) {
   const clips = [];
   const note = Object.create(PetNote.prototype);
   Object.assign(note, {
     loaded: true, isOpen: true, composing: false, page: 0, targetPage: 0,
-    pageTurning: false, pageTurnToken: 0,
+    pageTurning: false, pageTurnToken: 0, pageLines,
     text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np',
     input: { value: '' }, prev: {}, next: {}, pageNumber: {},
     el: { hidden: false, contains: () => false },
     saver: { schedule() {} },
     repaginate(offset) {
-      this.pages = pages.paginate(this.text, 20, () => 1);
+      this.pages = pages.paginate(this.text, 20, () => 1, this.pageLines);
       this.page = pages.pageAt(this.pages, offset);
       this.renderPage();
     },
     onPage(direction, done) { clips.push({ direction, done }); },
     clearTimers() {}, captureComposition() {}, flush: async () => {}, onChange() {},
   });
-  note.pages = pages.paginate(note.text, 20, () => 1);
+  note.pages = pages.paginate(note.text, 20, () => 1, note.pageLines);
   note.renderPage();
   return { note, clips };
 }
@@ -120,16 +120,83 @@ test('a failed clip and rejected play promise finish the turn only once', async 
   assert.equal(completed, 1);
 });
 
-test('a detached editor moves below or above a small pet when neither side has room', () => {
-  for (const height of [600, 430]) {
+test('the editor follows the actual paper dimensions even for a small pet', () => {
+  for (const height of [29, 72, 112, 194]) {
     const note = Object.create(PetNote.prototype);
-    const card = { x: 200, y: 350, w: 57, h: 29, detached: true };
+    const card = { x: 200, y: 350, w: height * 306 / 155, h: height };
     note.isOpen = true;
     note.el = { style: {}, dataset: {} };
-    note.getLayout = () => ({ card, bounds: { x: 0, y: 0, w: 400, h: height }, body: { x: 200, y: 310, w: 40 } });
+    note.controls = { offsetHeight: 22, offsetWidth: Math.max(76, card.w) };
+    note.getLayout = () => ({ card, bounds: { x: 0, y: 0, w: 900, h: 780 } });
     note.place();
-    const top = parseFloat(note.el.style.top), h = parseFloat(note.el.style.height);
-    assert.ok(top >= card.y + card.h || top + h <= 310, 'detached paper must not cover the character');
-    assert.ok(top >= 0 && top + h <= height);
+    assert.equal(parseFloat(note.el.style.width), card.w);
+    assert.equal(parseFloat(note.el.style.height), card.h);
+    assert.equal(parseFloat(note.el.style.top), card.y);
+  }
+});
+
+test('a full last page can extend at every measured line capacity', () => {
+  for (const capacity of [1, 3, 6, 11]) {
+    const { note, clips } = noteFixture(capacity);
+    note.text = Array.from({ length: capacity }, () => 'x').join('\n');
+    const original = note.text;
+    note.repaginate(0);
+    assert.equal(note.next.disabled, false, `${capacity} lines fills the page`);
+    note.changePage(1);
+    note.changePage(1);
+    clips[0].done();
+    assert.equal(note.page, 1);
+    assert.equal(note.text, original + '\n');
+    assert.equal(note.next.disabled, true);
+    assert.equal(clips.length, 1);
+  }
+});
+
+test('paper and its footer remain visible at each screen corner without changing paper size', () => {
+  for (const x of [-100, 1000]) for (const y of [-100, 1000]) {
+    const note = Object.create(PetNote.prototype);
+    const card = { x, y, w: 57, h: 29 };
+    note.isOpen = true;
+    note.el = { style: {} };
+    note.controls = { offsetWidth: 76, offsetHeight: 22 };
+    note.getLayout = () => ({ card, bounds: { x: 0, y: 0, w: 400, h: 430 } });
+    note.place();
+    const left = parseFloat(note.el.style.left), top = parseFloat(note.el.style.top);
+    assert.ok(left - 9.5 >= 0 && left + 57 + 9.5 <= 400);
+    assert.ok(top >= 0 && top + 29 + 22 <= 430);
+    assert.equal(parseFloat(note.el.style.width), 57);
+    assert.equal(parseFloat(note.el.style.height), 29);
+  }
+});
+
+test('repagination measures complete rows and retains the reading position as paper size changes', () => {
+  const { note } = noteFixture();
+  delete note.repaginate;
+  note.text = Array.from({ length: 30 }, () => 'x').join('\n');
+  note.input.clientWidth = 100;
+  let height = 17;
+  note.input.getBoundingClientRect = () => ({ height });
+  note.measureContext = { measureText: () => ({ width: 1 }) };
+  global.window = { PetNotePages: pages };
+  global.document = { activeElement: null };
+  global.getComputedStyle = () => ({ font: '12px/16px sans-serif', lineHeight: '16px',
+    paddingLeft: '0px', paddingRight: '0px', paddingTop: '0px', paddingBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px' });
+  try {
+    for (const [pixels, capacity] of [[17, 1], [60, 3], [95.9, 5], [100, 6], [180, 11]]) {
+      height = pixels;
+      note.repaginate(0);
+      assert.equal(note.pageLines, capacity);
+      assert.ok(note.pages.every(page => page.lines <= capacity));
+      assert.equal(note.pages.map(page => note.text.slice(page.start, page.end)).join(''), note.text);
+    }
+    height = 100;
+    note.repaginate(0);
+    note.page = 2;
+    const position = note.pages[note.page].start;
+    height = 17;
+    note.repaginate();
+    assert.equal(note.pages[note.page].start, position);
+  } finally {
+    delete global.window; delete global.document; delete global.getComputedStyle;
   }
 });

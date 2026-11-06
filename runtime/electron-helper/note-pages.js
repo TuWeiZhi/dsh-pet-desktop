@@ -1,7 +1,7 @@
 'use strict';
 
 // Split at displayed line boundaries while retaining every UTF-16 code unit of the stored text.
-function paginate(text, width, measure, maxLines = 5) {
+function paginate(text, width, measure, maxLines) {
   const pages = [];
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   let start = 0, line = 1, used = 0;
