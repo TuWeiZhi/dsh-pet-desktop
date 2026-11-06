@@ -90,8 +90,8 @@
   overflow: hidden;
   background: transparent;
   color: #332d32;
-  /* Three equal rows fill the paper; glyphs and margins scale with it. */
-  font: 23cqh/30cqh 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  /* Five equal rows fill the paper; glyphs and margins scale with it. */
+  font: 13.8cqh/18cqh 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
   overflow-wrap: anywhere;
   word-break: break-all;
   tab-size: 4;

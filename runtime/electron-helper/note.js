@@ -158,7 +158,7 @@ class PetNote {
     if (available > 0) this.pageWidth = available;
     const height = this.input.getBoundingClientRect().height - parseFloat(style.paddingTop) -
       parseFloat(style.paddingBottom) - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
-    if (this.el.dataset.material === 'video') this.pageLines = 3;
+    if (this.el.dataset.material === 'video') this.pageLines = 5;
     else if (height > 0) this.pageLines = Math.max(1, Math.floor(height / parseFloat(style.lineHeight)));
     const widths = new Map();
     const measure = (part, used = 0) => {
