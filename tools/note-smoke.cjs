@@ -93,6 +93,92 @@ app.whenReady().then(async () => {
   const visible = () => run('sprites[0].note.isOpen');
   try {
     await load();
+    if (process.argv.includes('--appearance')) {
+      await run(`document.body.style.background='#e6edf3'; sprites[0].note.show(true)`);
+      for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+      const facing = await run(`(async () => {
+        const p=sprites[0], film=p.noteFilm, rest=p.front===0?p.videoA:p.videoB;
+        rest.pause();
+        await new Promise(requestAnimationFrame);
+        const expected=document.createElement('canvas'); expected.width=film.canvas.width; expected.height=film.canvas.height;
+        const ctx=expected.getContext('2d'); ctx.scale(devicePixelRatio,devicePixelRatio);
+        ctx.translate(640+p.size,0); ctx.scale(-1,1); ctx.drawImage(rest,320,320,p.size,p.size*9/16);
+        const pixels=ctx.getImageData(0,0,expected.width,expected.height).data;
+        const transform=rest.style.transform; rest.style.transform='scaleX(-1)';
+        film.hide(); film.setClip('拿出',rest);
+        const opening=film.previousContext.getImageData(0,0,expected.width,expected.height).data;
+        if(!opening.every((v,i)=>v===pixels[i])) throw new Error('Opening snapshot lost the normal pet facing');
+        film.setClip('收起',rest); film.draw(window.PetNoteMedia.closeEnd);
+        const closing=film.context.getImageData(0,0,expected.width,expected.height).data;
+        let maxError=0, changed=0;
+        for(let i=0;i<closing.length;i++) {const error=Math.abs(closing[i]-pixels[i]);maxError=Math.max(maxError,error);if(error)changed++;}
+        rest.style.transform=transform;
+        return {maxError,changed,duration:film.transitionDuration,rate:film.video.playbackRate,
+          ready:film.video.readyState,restReady:rest.readyState,
+          expected:expected.toDataURL(),closing:film.canvas.toDataURL()};
+      })()`);
+      for (const name of ['expected','closing']) fs.writeFileSync(path.join(output,'facing-'+name+'.png'),Buffer.from(facing[name].split(',')[1],'base64'));
+      assert.equal(facing.maxError,0,'closing preserves the normal pet facing: '+JSON.stringify({...facing,expected:undefined,closing:undefined}));
+      const colors = [];
+      for (const [name, time] of [['拿出',4.9], ['待机',0], ['上一页',0], ['下一页',0], ['收起',0]]) {
+        const sample = await run(`(async () => {
+          const p=sprites[0], v=p.notePose;
+          p.noteClipToken++; p.noteFilm.setClip(${JSON.stringify(name)});
+          v.pause(); v.onended=null; v.onerror=null; v.loop=false;
+          v.src='../../assets/note-video/'+encodeURIComponent(${JSON.stringify(name)})+'.webm';
+          await new Promise((resolve,reject)=>{v.requestVideoFrameCallback(resolve);v.addEventListener('error',reject,{once:true});v.load()});
+          p.noteFilm.stop();
+          if (${time}>0) await new Promise(resolve=>{v.addEventListener('seeked',resolve,{once:true});v.currentTime=${time}});
+          // Exercise the actual alpha composite, including the first decoded
+          // frame after a source change. A load must never hard-cut the pose.
+          p.noteFilm.transitionStart=null; p.noteFilm.blending=true;
+          p.noteFilm.draw(${time});
+          const film=p.noteFilm, before=film.previousContext.getImageData(0,0,film.canvas.width,film.canvas.height).data;
+          const first=film.context.getImageData(0,0,film.canvas.width,film.canvas.height).data;
+          if (!first.every((value,i)=>value===before[i])) throw new Error('Clip boundary changed before the blend');
+          p.noteFilm.draw(${time}+.09*v.playbackRate);
+          const mid=film.context.getImageData(0,0,film.canvas.width,film.canvas.height).data;
+          p.noteFilm.draw(${time}+.3*v.playbackRate);
+          const after=film.context.getImageData(0,0,film.canvas.width,film.canvas.height).data;
+          let delta=0, fullDelta=0;
+          for(let i=0;i<before.length;i++) {delta+=Math.abs(mid[i]-before[i]); fullDelta+=Math.abs(after[i]-before[i]);}
+          if (fullDelta>100 && (delta<=0 || delta>=fullDelta)) throw new Error('Missing intermediate transition frame');
+          const c=document.createElement('canvas'); c.width=640; c.height=480;
+          const ctx=c.getContext('2d'); ctx.drawImage(v,0,0);
+          const rgba=ctx.getImageData(230,280,180,90).data;
+          return [0,1,2].map(channel=>{
+            const values=[]; for(let i=channel;i<rgba.length;i+=4) values.push(rgba[i]);
+            values.sort((a,b)=>a-b); return values[Math.floor(values.length/2)];
+          });
+        })()`);
+        colors.push(sample);
+        await delay(80);
+        fs.writeFileSync(path.join(output, name+'.png'), (await win.webContents.capturePage()).toPNG());
+      }
+      console.log('Settled paper RGB: ' + JSON.stringify(colors));
+      const spread = [0,1,2].map(c => Math.max(...colors.map(rgb=>rgb[c]))-Math.min(...colors.map(rgb=>rgb[c])));
+      assert.ok(spread.every(value=>value<=4), 'all clips must share the writing-paper palette; RGB spread: '+spread);
+      const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
+      for (const size of [120, 300, 462]) {
+        await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:${size}})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
+        for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
+        const layout = await run(`(() => {
+          const p=sprites[0], n=p.note;
+          n.text='第一行\\n第二行\\n第三行\\n第四行\\n第五行'; n.repaginate(0); n.clearTimers();
+          return {scale:p.noteFilm.scale(), detached:n.el.dataset.detached,
+            height:n.input.clientHeight, scroll:n.input.scrollHeight,
+            card:n.el.getBoundingClientRect().toJSON(), paper:p.noteFilm.getCard()};
+        })()`);
+        assert.equal(layout.scale, size/640, 'note animations never enlarge the character');
+        assert.equal(layout.detached, String(size<462));
+        assert.ok(layout.scroll<=layout.height+1, 'all five lines fit');
+        assert.ok(layout.card.x>=0 && layout.card.right<=924, 'editor remains on screen');
+        await delay(100);
+        fs.writeFileSync(path.join(output, 'size-'+size+'.png'), (await win.webContents.capturePage()).toPNG());
+      }
+      console.log('PASS: consistent paper color, unchanged pet scale, five-line inline and detached editors');
+      app.exit(0); return;
+    }
     if (process.argv.includes('--film')) {
       await run(`document.body.style.background='#e6edf3'; sprites[0].note.show(true)`);
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
@@ -176,20 +262,22 @@ app.whenReady().then(async () => {
       }
       assert.ok(repeatedFrames / capturedFrames < .02, 'preview must not encode cached screenshots: ' + repeatedFrames + '/' + capturedFrames);
       console.log('Preview adjacent repeated source frames: ' + repeatedFrames + '/' + capturedFrames);
-      // Small pets must still have five readable rows on the same paper.
+      // Small pets use a readable detached editor without enlarging the character.
       const defaults = await run('JSON.parse(JSON.stringify(sprites[0].pet))');
       await run(`(async()=>{await sprites[0].dispose();sprites=[new PetSprite({...${JSON.stringify(defaults)},size:120})];await sprites[0].note.ready;sprites[0].note.show(true)})()`);
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
-      assert.equal(await run('sprites[0].note.input.clientHeight'),90);
-      assert.equal(await run('sprites[0].note.el.offsetWidth'),257);
-      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgba(0, 0, 0, 0)');
+      assert.equal(await run('sprites[0].note.input.clientHeight'),80);
+      assert.equal(await run('sprites[0].note.el.offsetWidth'),260);
+      assert.equal(await run('getComputedStyle(sprites[0].note.el).backgroundColor'),'rgb(235, 218, 208)');
+      assert.equal(await run('sprites[0].noteFilm.scale()'),120/640);
       assert.equal(await run('sprites[0].noteFilm.canvas.hidden'),false);
       fs.writeFileSync(path.join(output,'small-pet.png'),(await win.webContents.capturePage()).toPNG());
       const edgePixels = await run(`(() => {
         const p=sprites[0], n=p.note, getLayout=n.getLayout;
         n.getLayout=()=>({...getLayout(),bounds:{x:0,y:0,w:400,h:430}});
         n.place(); p.noteFilm.draw(p.notePose.currentTime);
-        const card=n.el.getBoundingClientRect(), canvas=p.noteFilm.canvas;
+        const paper=p.noteFilm.getCard(), canvas=p.noteFilm.canvas;
+        const card={left:p.margin.l+paper.x,top:p.margin.t+p.bottomPad+paper.y,right:p.margin.l+paper.x+paper.w,bottom:p.margin.t+p.bottomPad+paper.y+paper.h};
         const surface=canvas.getBoundingClientRect(), density=devicePixelRatio;
         return [[card.left+12,card.top+20],[card.right-12,card.bottom-12]].map(([x,y])=>
           Array.from(canvas.getContext('2d').getImageData(Math.round((x-surface.left)*density),Math.round((y-surface.top)*density),1,1).data));

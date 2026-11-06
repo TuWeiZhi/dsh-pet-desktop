@@ -134,7 +134,7 @@ ffmpeg -i '动作源视频.mp4' `
 | 下一页 | `桌宠“下一页”动作生成.mp4` | 97 / 4.04 秒 |
 | 收起 | `桌宠“收起便签”连续动画生成需求.mp4` | 121 / 5.04 秒 |
 
-处理保留每一帧和 24 fps，仅去除绿幕、抑制边缘溢绿、去掉音轨，并对每段整幅画面作固定尺寸/位置校准。待机片的原始纸张略高，整幅纵向校准量约 5%；没有单独拆分、重画或替换纸张和手，也没有合成角色动作。输出保留 4:3 透明画布，编码为 640×480 VP9 Alpha WebM；源文件及 SHA-256 记录在 `assets/note-video/sources.json`。
+处理保留每一帧和 24 fps，去除绿幕、抑制边缘溢绿、去掉音轨，并对每段整幅画面作固定尺寸/位置校准。待机片的原始纸张略高，整幅纵向校准量约 5%；随后整幅缩至 90%，对齐普通待机的人物高度与脚底位置。纸面按每段固定的 RGB 偏移统一为暖纸色，保留原纹理、阴影与动作；没有重画、替换纸张或合成角色动作。输出保留 4:3 透明画布，编码为 640×480 VP9 Alpha WebM；源文件、SHA-256 与校色值记录在 `assets/note-video/sources.json`。
 
 复现需要 Python 的 `numpy`、`opencv-python-headless` 和支持 `libvpx-vp9` 的 FFmpeg：
 
@@ -142,8 +142,8 @@ ffmpeg -i '动作源视频.mp4' `
 python tools/prepare-note-videos.py --ffmpeg C:/ffmpeg/bin/ffmpeg.exe
 ```
 
-运行时 `note-film.js` 完整绘制视频帧，`note-media-data.js` 保存纸面坐标和播放速度。文字在拿出 3.5 秒、纸面稳定后显示，翻页时隐藏。拿出和待机保持原速；上一页、下一页及收起为 2 倍速，翻页约 2.02 秒，收起约 2.52 秒。编辑区仍为五行；很小的宠物会在拿出时整体放大以保持可读性，收起后恢复尺寸。跨视频加载期间保留上一帧，避免透明空帧闪烁。
+运行时 `note-film.js` 完整绘制视频帧，`note-media-data.js` 保存纸面坐标和播放速度。文字在拿出 3.5 秒、纸面稳定后显示，翻页时隐藏。拿出和待机保持原速；上一页、下一页及收起为 2 倍速，翻页约 2.02 秒，收起约 2.52 秒。人物始终按设置尺寸显示，不再为文字整体放大；手持纸高度不足 110 CSS 像素时，展开同色的独立五行编辑区，优先放在侧面，侧面不足时放在下方或上方。默认尺寸仍直接在手持纸上编辑。跨视频加载期间保留上一帧，首帧解码后用 180 毫秒混合过渡；待机循环接缝同样处理，减少动态效果设置会禁用新增的混合过渡。
 
-旧 `assets/note-layers/` 和 `tools/retouch-note.py` 仅保留作历史材料，不再被便签调用，前者已排除出安装包。可运行 `node --test src/host/note-animation.test.cjs src/host/note-pages.test.cjs`、`electron tools/note-smoke.cjs --pages` 和 `electron tools/note-smoke.cjs --film` 检查交互及实际渲染。单独生成的片段仍存在细微画风、纸色差异，应以完整播放预览判断接缝，不能仅以测试通过判断美术效果。
+旧 `assets/note-layers/` 和 `tools/retouch-note.py` 仅保留作历史材料，不再被便签调用，前者已排除出安装包。可运行 `node --test src/host/note-film.test.cjs src/host/note-animation.test.cjs src/host/note-pages.test.cjs`、`electron tools/note-smoke.cjs --pages`、`electron tools/note-smoke.cjs --appearance` 和 `electron tools/note-smoke.cjs --film` 检查交互、纸色、缩放与实际渲染。单独生成的片段仍存在细微画风、纹理差异，应以完整播放预览判断接缝，不能仅以测试通过判断美术效果。
 
 `--film` 是逐帧导出预览：定位到每帧中点，等待 `seeked` 确认解码完成，再等待页面绘制并保存。不能仅等待 `requestVideoFrameCallback`，它可能先返回旧帧，此时视频仍在跳转，画布会保留上一帧。导出会检查相邻源帧截图是否重复，避免旧画面造成卡顿。当前预览应按输出提示以 48 fps 编码，保留加速动作的每一帧；原速动作每帧显示两次，保持原来的节奏。

@@ -259,6 +259,7 @@ class PetSprite {
     stage.appendChild(this.notePose);
     this.noteFilm = new window.PetNoteFilm(this.notePose, stage, this.size, () => {
       const card = this.noteFilm.getCard();
+      if (card.detached) return { x: 0, y: 0 };
       return {
         x: parseFloat(this.note.el.style.left) - this.margin.l - card.x,
         y: parseFloat(this.note.el.style.top) - this.margin.t - this.bottomPad - card.y,
@@ -755,7 +756,7 @@ class PetSprite {
 
   playNoteClip(name, loop, onEnded) {
     const video = this.notePose;
-    this.noteFilm.setClip(name);
+    this.noteFilm.setClip(name, this.front === 0 ? this.videoA : this.videoB);
     const token = ++this.noteClipToken;
     let completed = false;
     const finish = () => {

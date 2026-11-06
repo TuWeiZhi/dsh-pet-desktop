@@ -320,11 +320,30 @@ class PetNote {
   place() {
     if (!this.isOpen) return;
     const { anchor, bounds, body, card } = this.getLayout();
-    const p = card ? {
+    let p = card ? {
       ...card,
       x: Math.max(bounds.x, Math.min(card.x, bounds.x + bounds.w - card.w)),
       y: Math.max(bounds.y, Math.min(card.y, bounds.y + bounds.h - card.h)),
     } : notePlacement(anchor, bounds, body);
+    this.el.dataset.detached = String(Boolean(card?.detached));
+    if (card?.detached) {
+      const w = Math.min(260, bounds.w);
+      const h = Math.min(130, bounds.h);
+      const right = card.x + card.w + 12;
+      const left = card.x - w - 12;
+      let x = right;
+      let y = card.y;
+      if (right + w > bounds.x + bounds.w) {
+        x = left;
+        if (left < bounds.x) {
+          x = card.x + (card.w - w) / 2;
+          y = card.y + card.h + 12;
+          if (y + h > bounds.y + bounds.h) y = (body?.y ?? card.y) - h - 12;
+        }
+      }
+      p = { x: Math.max(bounds.x, Math.min(x, bounds.x + bounds.w - w)),
+        y: Math.max(bounds.y, Math.min(y, bounds.y + bounds.h - h)), w, h };
+    }
     Object.assign(this.el.style, { left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' });
   }
 

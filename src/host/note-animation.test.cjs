@@ -119,3 +119,17 @@ test('a failed clip and rejected play promise finish the turn only once', async 
   await Promise.resolve();
   assert.equal(completed, 1);
 });
+
+test('a detached editor moves below or above a small pet when neither side has room', () => {
+  for (const height of [600, 430]) {
+    const note = Object.create(PetNote.prototype);
+    const card = { x: 200, y: 350, w: 57, h: 29, detached: true };
+    note.isOpen = true;
+    note.el = { style: {}, dataset: {} };
+    note.getLayout = () => ({ card, bounds: { x: 0, y: 0, w: 400, h: height }, body: { x: 200, y: 310, w: 40 } });
+    note.place();
+    const top = parseFloat(note.el.style.top), h = parseFloat(note.el.style.height);
+    assert.ok(top >= card.y + card.h || top + h <= 310, 'detached paper must not cover the character');
+    assert.ok(top >= 0 && top + h <= height);
+  }
+});
