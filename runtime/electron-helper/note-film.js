@@ -19,6 +19,7 @@ class PetNoteFilm {
     this.width = size + 640;
     this.height = size * 3 / 4 + 640;
     const density = window.devicePixelRatio || 1;
+    this.density = density;
     this.canvas.width = Math.ceil(this.width * density);
     this.canvas.height = Math.ceil(this.height * density);
     this.canvas.style.width = this.width + 'px';
@@ -31,6 +32,7 @@ class PetNoteFilm {
     this.previousContext = this.previous.getContext('2d');
     this.transitionDuration = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
       ? 0 : window.PetNoteMedia.transitionDuration;
+    this.blendDuration = this.transitionDuration;
     stage.appendChild(this.canvas);
     this.loaded = () => {
       if (!this.clip) return;
@@ -56,35 +58,54 @@ class PetNoteFilm {
     };
   }
 
-  snapshot() {
+  snapshot(duration = this.transitionDuration) {
     this.previousContext.clearRect(0, 0, this.previous.width, this.previous.height);
     this.previousContext.drawImage(this.canvas, 0, 0);
-    this.blending = this.transitionDuration > 0;
+    this.blendDuration = duration;
+    this.blending = duration > 0;
     this.transitionStart = null;
   }
 
-  drawRestingVideo() {
-    this.context.save();
-    // drawImage reads raw video pixels, not the CSS facing of the visible pet.
-    if (this.restingVideo.style.transform === 'scaleX(-1)') {
-      this.context.translate(640 + this.size, 0);
-      this.context.scale(-1, 1);
+  captureOrdinaryFrame(videos, context = this.context) {
+    context.clearRect(0, 0, this.width, this.height);
+    let captured = false;
+    // A/B videos can both be visible during their CSS fade. Preserve DOM order,
+    // current opacity and the transform origin (including the click squash).
+    for (const video of videos) {
+      if (!video || video.readyState < 2) continue;
+      const style = getComputedStyle(video);
+      const opacity = Number(style.opacity);
+      if (opacity <= 0) continue;
+      const matrix = new DOMMatrixReadOnly(style.transform === 'none' ? undefined : style.transform);
+      const [originX, originY] = style.transformOrigin.split(' ').map(parseFloat);
+      context.save();
+      context.globalAlpha = opacity;
+      context.translate(320 + originX, 320 + originY);
+      context.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
+      context.drawImage(video, -originX, -originY, this.size, this.size * 9 / 16);
+      context.restore();
+      captured = true;
     }
-    this.context.drawImage(this.restingVideo, 320, 320, this.size, this.size * 9 / 16);
-    this.context.restore();
+    return captured;
   }
 
-  setClip(name, restingVideo) {
+  setClip(name, restingVideo, ordinaryVideos = [restingVideo]) {
     this.stop();
-    this.restingVideo = restingVideo;
-    if (this.canvas.hidden && restingVideo?.readyState >= 2) {
-      this.context.clearRect(0, 0, this.width, this.height);
-      this.drawRestingVideo();
-      this.snapshot();
-    } else if (!this.canvas.hidden) this.snapshot();
+    this.ordinaryVideos = ordinaryVideos;
+    this.returnCaptured = false;
     this.clip = name;
     this.lastTime = null;
-    // Retain the last rendered frame until the next video has decoded.
+    if (this.canvas.hidden) {
+      if (this.captureOrdinaryFrame(ordinaryVideos)) {
+        this.snapshot(name === '拿出' && this.transitionDuration > 0
+          ? window.PetNoteMedia.openingTransitionDuration : this.transitionDuration);
+        // Take over immediately: neither CSS fades nor a late ordinary-video
+        // decode can change the visible pose while the note clip is loading.
+        this.canvas.hidden = false;
+        this.onFrame(name, 0);
+      }
+    } else this.snapshot();
+    // Retain the displayed composite until the next video has decoded.
   }
 
   schedule() {
@@ -115,7 +136,7 @@ class PetNoteFilm {
     this.context.clearRect(0, 0, this.width, this.height);
     if (this.blending) {
       if (this.transitionStart === null) this.transitionStart = time;
-      const progress = Math.min(1, (time - this.transitionStart) / this.video.playbackRate / this.transitionDuration);
+      const progress = Math.min(1, (time - this.transitionStart) / this.video.playbackRate / this.blendDuration);
       this.blending = progress < 1;
       if (this.blending) {
         const weight = progress * progress * (3 - 2 * progress);
@@ -129,10 +150,21 @@ class PetNoteFilm {
     this.context.drawImage(this.video, x, y, media.width * scale, media.height * scale);
     this.context.globalAlpha = 1;
     this.context.globalCompositeOperation = 'source-over';
-    if (this.clip === '收起' && this.restingVideo?.readyState >= 2 && this.transitionDuration > 0) {
-      const duration = this.transitionDuration * this.video.playbackRate;
-      const progress = Math.max(0, Math.min(1, (time - media.closeEnd + duration) / duration));
+    if (this.clip === '收起' && this.ordinaryVideos.some(video => video?.readyState >= 2) && this.transitionDuration > 0) {
+      const duration = media.closingTransitionDuration * this.video.playbackRate;
+      let progress = Math.max(0, Math.min(1, (time - media.closeEnd + duration) / duration));
+      progress = progress * progress * (3 - 2 * progress);
       if (progress > 0) {
+        if (!this.returnCaptured) {
+          // The initial note-to-note blend is over. Reuse its buffer for the
+          // full ordinary composite that will be exposed when closing ends.
+          this.previousContext.clearRect(0, 0, this.previous.width, this.previous.height);
+          this.previousContext.save();
+          this.previousContext.scale(this.density, this.density);
+          this.captureOrdinaryFrame(this.ordinaryVideos, this.previousContext);
+          this.previousContext.restore();
+          this.returnCaptured = true;
+        }
         if (progress === 1) {
           // Match the normal renderer exactly at the handoff, including edges.
           this.context.clearRect(0, 0, this.width, this.height);
@@ -143,7 +175,7 @@ class PetNoteFilm {
           this.context.globalCompositeOperation = 'lighter';
           this.context.globalAlpha = progress;
         }
-        this.drawRestingVideo();
+        this.context.drawImage(this.previous, 0, 0, this.width, this.height);
         this.context.globalAlpha = 1;
         this.context.globalCompositeOperation = 'source-over';
       }

@@ -748,14 +748,14 @@ class PetSprite {
       this.notePhase = 'idle';
       this.note.el.classList.remove('is-turning');
       done();
-      // 连续翻页直接接下一段，队列完成后才恢复待机。
+      // 连续点击已合并到当前动画，完成后显示最新页并恢复待机。
       if (this.notePhase === 'idle') this.playNoteClip('待机', true);
     });
   }
 
   playNoteClip(name, loop, onEnded) {
     const video = this.notePose;
-    this.noteFilm.setClip(name, this.front === 0 ? this.videoA : this.videoB);
+    this.noteFilm.setClip(name, this.front === 0 ? this.videoA : this.videoB, [this.videoA, this.videoB]);
     const token = ++this.noteClipToken;
     let completed = false;
     const finish = () => {

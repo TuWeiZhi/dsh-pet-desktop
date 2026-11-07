@@ -30,7 +30,7 @@ jobs:
         run: node tools/verify-desktop.mjs
 
       - name: 便签、动画与托盘回归测试
-        run: node --experimental-strip-types --test src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts src/host/note-pages.test.cjs src/host/desktop-sleep.test.cjs src/host/note-animation.test.cjs src/host/note-film.test.cjs src/host/desktop-random.test.cjs src/shared/pickers.test.ts
+        run: node --experimental-strip-types --test src/host/desktop-settings.test.ts src/host/config.test.ts src/host/note.test.ts src/host/note-storage.test.ts src/host/pointer-target.test.ts src/host/desktop-reload.test.ts src/host/desktop-updates.test.ts src/host/note-pages.test.cjs src/host/desktop-sleep.test.cjs src/host/note-animation.test.cjs src/host/note-film.test.cjs src/host/desktop-random.test.cjs src/shared/pickers.test.ts
 
       - name: 安装依赖
         run: npm ci

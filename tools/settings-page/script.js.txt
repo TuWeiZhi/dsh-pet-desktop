@@ -219,6 +219,7 @@
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
+    if (save.disabled) return;
     if (!form.reportValidity()) return;
     save.disabled = true;
     message('正在保存到本机…');
@@ -255,9 +256,13 @@
     message('本次运行的访问凭据已失效（刷新或重开浏览器会丢失）。请从托盘图标右键或宠物右键菜单里的「AI 设置」重新打开本页。', true);
     return;
   }
-  petApi('GET', '/dsh-pet-7340/config')
-    .then(data => { config = data; fillPets(); })
-    .catch(error => message('桌宠配置读取失败：' + error.message, true));
-  request('GET').then(data => { populateAi(data); save.disabled = false; message('设置只在本机保存。'); })
-    .catch(error => message(error.message, true));
+  Promise.all([
+    petApi('GET', '/dsh-pet-7340/config').then(data => {
+      config = data;
+      if (!current()) throw new Error('未读取到桌宠配置，请重新打开设置。');
+      fillPets();
+    }),
+    request('GET').then(populateAi)
+  ]).then(() => { save.disabled = false; message('设置只在本机保存。'); })
+    .catch(error => message('设置读取失败：' + error.message, true));
 })();

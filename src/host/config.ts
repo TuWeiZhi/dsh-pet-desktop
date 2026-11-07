@@ -124,8 +124,9 @@ function stripJsonc(src: string): string {
     // 真正的坑不在这里，而是下面的 readJsonc：解析失败被静默吞掉 → 回退默认值
     // → 设置页再保存一次就把用户配置覆盖没了。
     .replace(/^\uFEFF/, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^\\:])\/\/.*$/gm, '$1')
+    // Match complete quoted strings first so names, prompts and whisper text stay intact.
+    .replace(/"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+      (part) => part.startsWith('"') ? part : ' ')
     .trim();
 }
 

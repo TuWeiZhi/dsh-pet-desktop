@@ -33,7 +33,6 @@ class PetNote {
     this.text = '';
     this.pages = [{ start: 0, end: 0, lines: 1 }];
     this.page = 0;
-    this.targetPage = 0;
     this.pageTurning = false;
     this.pageTurnToken = 0;
     this.pageWidth = 1;
@@ -178,11 +177,10 @@ class PetNote {
     const range = this.pages[this.page];
     const value = this.text.slice(range.start, range.end);
     if (this.input.value !== value) this.input.value = value;
-    const target = this.pageTurning ? this.targetPage : this.page;
     const tail = this.pages.at(-1);
     const last = this.pages.length - 1 + (tail.lines === this.pageLines && tail.end > tail.start ? 1 : 0);
-    this.prev.disabled = target === 0;
-    this.next.disabled = target >= last;
+    this.prev.disabled = this.page === 0;
+    this.next.disabled = this.page >= last;
     this.pageNumber.textContent = String(this.page + 1);
     if (offset !== null && document.activeElement === this.input) {
       const local = Math.max(0, Math.min(this.input.value.length, offset - range.start));
@@ -211,34 +209,25 @@ class PetNote {
 
   changePage(direction) {
     if (!this.loaded || this.composing || !this.isOpen) return;
-    const current = this.pageTurning ? this.targetPage : this.page;
     const tail = this.pages.at(-1);
     const last = this.pages.length - 1 + (tail.lines === this.pageLines && tail.end > tail.start ? 1 : 0);
-    this.targetPage = Math.max(0, Math.min(last, current + direction));
-    if (this.pageTurning) {
-      this.renderPage();
-      return;
-    }
-    this.turnPage();
-  }
-
-  turnPage() {
-    if (this.page === this.targetPage) return;
-    const direction = Math.sign(this.targetPage - this.page);
-    this.pageTurning = true;
-    const token = ++this.pageTurnToken;
-    if (direction > 0 && this.page === this.pages.length - 1) {
+    const target = Math.max(0, Math.min(last, this.page + direction));
+    if (target === this.page) return;
+    if (target === this.pages.length) {
       this.text += '\n';
       this.saver.schedule(this.text);
       this.repaginate(this.text.length);
     } else {
-      this.page = Math.max(0, Math.min(this.pages.length - 1, this.page + direction));
+      this.page = target;
       this.renderPage();
     }
+    // Navigation takes effect immediately; rapid clicks share the in-flight clip.
+    if (this.pageTurning) return;
+    this.pageTurning = true;
+    const token = ++this.pageTurnToken;
     const done = () => {
       if (token !== this.pageTurnToken || !this.pageTurning || !this.isOpen) return;
       this.pageTurning = false;
-      this.turnPage();
     };
     if (this.onPage) this.onPage(direction, done);
     else done();
@@ -247,7 +236,6 @@ class PetNote {
   cancelPageTurns() {
     this.pageTurnToken++;
     this.pageTurning = false;
-    this.targetPage = this.page;
   }
 
   saveFailed(error) {

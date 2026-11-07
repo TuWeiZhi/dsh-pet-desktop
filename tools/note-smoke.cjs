@@ -93,6 +93,74 @@ app.whenReady().then(async () => {
   const visible = () => run('sprites[0].note.isOpen');
   try {
     await load();
+    if (process.argv.includes('--handoff')) {
+      const handoff = await run(`(async () => {
+        const p = sprites[0], film = p.noteFilm;
+        // Reproduce opening during the ordinary A/B fade, including a mirrored pose.
+        for (const v of [p.videoA, p.videoB]) {
+          v.onended = null; v.autoplay = false;
+          if (v.readyState < 2) {
+            v.src = p.assetBase + encodeURIComponent(p.animations.idle[0]) + '.webm';
+            await new Promise((resolve, reject) => {
+              v.addEventListener('loadeddata', resolve, { once: true });
+              v.addEventListener('error', reject, { once: true }); v.load();
+            });
+          }
+          v.pause(); v.style.transition = 'none';
+        }
+        p.front = 1;
+        p.videoA.style.opacity = '.65';
+        p.videoB.style.opacity = '.35';
+        p.videoA.style.transform = '';
+        p.videoB.style.transform = 'scaleX(-1) scaleY(.85)';
+        p.videoB.style.transformOrigin = 'bottom';
+        await new Promise(requestAnimationFrame);
+        const expected = document.createElement('canvas');
+        expected.width = film.canvas.width; expected.height = film.canvas.height;
+        const ctx = expected.getContext('2d'); ctx.scale(devicePixelRatio, devicePixelRatio);
+        ctx.globalAlpha = .65; ctx.drawImage(p.videoA, 320, 320, p.size, p.height);
+        ctx.globalAlpha = .35; ctx.translate(320+p.size/2, 320+p.height);
+        ctx.scale(-1, .85); ctx.drawImage(p.videoB, -p.size/2, -p.height, p.size, p.height);
+        // Delay decoder delivery: the handoff must already hold the displayed composite.
+        film.schedule = () => {};
+        p.note.show();
+        const before = expected.getContext('2d').getImageData(0, 0, expected.width, expected.height).data;
+        const captured = film.previousContext.getImageData(0, 0, expected.width, expected.height).data;
+        let maxError = 0, changed = 0;
+        for (let i=0; i<before.length; i++) {
+          const error = Math.abs(before[i]-captured[i]);
+          maxError = Math.max(maxError, error); if (error > 2) changed++;
+        }
+        const canvasVisible = !film.canvas.hidden;
+        const ordinaryHidden = getComputedStyle(p.videoA).visibility === 'hidden';
+        if (p.notePose.readyState < 2) await new Promise(resolve => p.notePose.addEventListener('loadeddata', resolve, {once:true}));
+        p.notePose.pause();
+        film.draw(0);
+        const firstFrame = film.context.getImageData(0, 0, expected.width, expected.height).data;
+        let firstFrameMaxError = 0;
+        for (let i=0; i<before.length; i++) firstFrameMaxError = Math.max(firstFrameMaxError, Math.abs(before[i]-firstFrame[i]));
+        film.setClip('收起', p.videoB, [p.videoA, p.videoB]);
+        film.draw(0);
+        film.draw(window.PetNoteMedia.closeEnd);
+        const closing = film.context.getImageData(0, 0, expected.width, expected.height).data;
+        let closingMaxError = 0;
+        for (let i=0; i<before.length; i++) closingMaxError = Math.max(closingMaxError, Math.abs(before[i]-closing[i]));
+        return { maxError, changed, canvasVisible, ordinaryHidden,
+          firstFrameMaxError, closingMaxError,
+          expected: expected.toDataURL(), captured: film.previous.toDataURL() };
+      })()`);
+      for (const name of ['expected', 'captured']) {
+        fs.writeFileSync(path.join(output, 'handoff-'+name+'.png'), Buffer.from(handoff[name].split(',')[1], 'base64'));
+      }
+      console.log('Opening handoff: '+JSON.stringify({...handoff, expected:undefined, captured:undefined}));
+      assert.ok(handoff.maxError <= 2, 'opening must preserve both visible layers, opacity, facing and squash');
+      assert.ok(handoff.firstFrameMaxError <= 2, 'the first decoded note frame must not jump from the held composite');
+      assert.ok(handoff.closingMaxError <= 2, 'closing must return to the complete ordinary composite without a pose or opacity jump');
+      assert.equal(handoff.canvasVisible, true, 'snapshot must be visible while the note decoder is loading');
+      assert.equal(handoff.ordinaryHidden, true, 'ordinary CSS transitions must not advance behind the snapshot');
+      console.log('PASS: ordinary-animation composite survives opening and closing handoffs without a flash');
+      app.exit(0); return;
+    }
     if (process.argv.includes('--appearance')) {
       await run(`document.body.style.background='#e6edf3'; sprites[0].note.show(true)`);
       for (let i=0; i<120 && await run('sprites[0].notePhase') !== 'idle'; i++) await delay(100);
@@ -277,8 +345,8 @@ app.whenReady().then(async () => {
           if (previousFrame && png.equals(previousFrame)) repeatedFrames++;
           previousFrame = png;
           capturedFrames++;
-          // 48 fps preserves every source frame at 2x. Original-speed clips
-          // hold each source frame for two output frames, keeping their timing.
+          // The output rate preserves every source frame at the fastest speed;
+          // slower clips repeat frames to keep their intended timing.
           for (let copy = 0; copy < previewFps / (24 * playbackRates[name]); copy++) {
             fs.writeFileSync(path.join(frameDir, String(number++).padStart(4,'0')+'.png'), png);
           }
@@ -389,35 +457,35 @@ app.whenReady().then(async () => {
         };
         n.next.click(); n.next.click(); n.next.click();
       })()`);
-      assert.equal(await run('sprites[0].note.page'), 1, 'rapid clicks do not jump ahead of the animation');
-      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
+      assert.equal(await run('sprites[0].note.page'), 3, 'rapid clicks immediately select the latest page');
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 4);
       await waitForNoteIdle();
       assert.equal(await run('sprites[0].note.page'), 3);
-      assert.deepEqual(await run('window.noteTurnClips'), ['下一页', '下一页', '下一页']);
+      assert.deepEqual(await run('window.noteTurnClips'), ['下一页']);
       const turnDurations = await run('window.noteTurnDurations');
-      assert.ok(turnDurations.every(ms => ms >= 1900 && ms < 2800), 'page turns take about two seconds at 2x: ' + turnDurations);
+      assert.ok(turnDurations.every(ms => ms >= 850 && ms < 1800), 'rapid navigation shares one roughly one-second clip at 4x: ' + turnDurations);
       console.log('Page-turn elapsed ms: ' + turnDurations.map(Math.round).join(', '));
       assert.equal(await run('getComputedStyle(sprites[0].note.input).visibility'), 'visible');
       assert.equal(await run('sprites[0].notePose.playbackRate'), 1);
       await run('window.noteTurnClips = []; sprites[0].note.prev.click(); sprites[0].note.prev.click()');
       await waitForNoteIdle();
       assert.equal(await run('sprites[0].note.page'), 1);
-      assert.deepEqual(await run('window.noteTurnClips'), ['上一页', '上一页']);
+      assert.deepEqual(await run('window.noteTurnClips'), ['上一页']);
       await run('window.noteTurnClips = []; sprites[0].note.next.click(); sprites[0].note.next.click(); sprites[0].note.close(); sprites[0].note.show(true)');
-      assert.equal(await run('sprites[0].notePose.playbackRate'), 1);
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
       await waitForNoteIdle();
-      assert.equal(await run('sprites[0].note.page'), 2, 'closing discards the queued page request');
+      assert.equal(await run('sprites[0].note.page'), 3, 'closing retains the latest selected page');
       assert.deepEqual(await run('window.noteTurnClips'), ['下一页']);
       await run('sprites[0].playNoteClip = window.originalNoteClip; void 0');
       await run('sprites[0].note.close()');
       assert.equal(await run('sprites[0].notePhase'), 'closing');
-      assert.equal(await run('sprites[0].notePose.playbackRate'), 2);
+      assert.equal(await run('sprites[0].notePose.playbackRate'), 4);
       await run(`sprites[0].onMenuAction({anim:'哈欠连天'})`);
       assert.equal(await run('sprites[0].notePhase'), null, 'a requested action cancels the closing animation');
       await delay(5500);
       assert.equal(await run('sprites[0].anim'), '哈欠连天', 'closing cannot override the newer action');
       assert.equal(await run('sprites[0].noteFilm.canvas.hidden'), true, 'cancelled closing cannot resurrect the note surface');
-      console.log('PASS: original-speed opening, five proportional lines, 2x page changes and closing, rapid forward/back navigation, close/reopen and text preservation');
+      console.log('PASS: 2x opening, 4x closing/page changes, five proportional lines, coalesced forward/back navigation, close/reopen and text preservation');
       console.log('Screenshot: ' + path.join(output, 'pages-preview.png'));
       app.exit(0); return;
     }

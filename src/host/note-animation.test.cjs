@@ -14,7 +14,7 @@ function noteFixture(pageLines = 5) {
   const clips = [];
   const note = Object.create(PetNote.prototype);
   Object.assign(note, {
-    loaded: true, isOpen: true, composing: false, page: 0, targetPage: 0,
+    loaded: true, isOpen: true, composing: false, page: 0,
     pageTurning: false, pageTurnToken: 0, pageLines,
     text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np',
     input: { value: '' }, prev: {}, next: {}, pageNumber: {},
@@ -33,31 +33,29 @@ function noteFixture(pageLines = 5) {
   return { note, clips };
 }
 
-test('rapid forward clicks advance one page per completed animation', () => {
+test('rapid forward clicks reach the latest page with one animation', () => {
   const { note, clips } = noteFixture();
   note.changePage(1);
   note.changePage(1);
   note.changePage(1);
-  assert.equal(note.page, 1);
+  assert.equal(note.page, 3);
+  assert.equal(note.pageNumber.textContent, '4');
   assert.equal(clips.length, 1);
   clips[0].done();
-  assert.equal(note.page, 2);
-  assert.equal(clips.length, 2);
-  clips[1].done();
   assert.equal(note.page, 3);
-  clips[2].done();
   assert.equal(note.pageTurning, false);
-  assert.deepEqual(clips.map(c => c.direction), [1, 1, 1]);
+  assert.deepEqual(clips.map(c => c.direction), [1]);
 });
 
 test('reversing rapid navigation turns back to the requested page', () => {
   const { note, clips } = noteFixture();
   note.changePage(1);
   note.changePage(-1);
+  assert.equal(note.page, 0);
   clips[0].done();
   assert.equal(note.page, 0);
-  clips[1].done();
-  assert.deepEqual(clips.map(c => c.direction), [1, -1]);
+  assert.equal(note.pageTurning, false);
+  assert.deepEqual(clips.map(c => c.direction), [1]);
 });
 
 test('page boundaries do not play a turn when the page cannot change', () => {
@@ -69,7 +67,7 @@ test('page boundaries do not play a turn when the page cannot change', () => {
   assert.equal(clips.length, 0);
 });
 
-test('closing cancels queued turns and invalidates the old completion', async () => {
+test('closing retains the latest page and invalidates the old completion', async () => {
   const { note, clips } = noteFixture();
   note.changePage(1);
   note.changePage(1);
@@ -77,17 +75,17 @@ test('closing cancels queued turns and invalidates the old completion', async ()
   try { note.close(); } finally { delete global.document; }
   note.isOpen = true;
   clips[0].done();
-  assert.equal(note.page, 1);
+  assert.equal(note.page, 2);
   assert.equal(note.pageTurning, false);
   assert.equal(clips.length, 1);
 });
 
-test('opening and idle stay at 1x while page turns and closing use 2x', () => {
+test('opening uses 2x, closing and page turns use 4x, and idle stays at 1x', () => {
   const pet = Object.create(context.PetSprite.prototype);
   pet.noteClipToken = 0;
   pet.noteFilm = { setClip() {} };
   pet.notePose = { load() {}, play: () => Promise.resolve() };
-  for (const [name, speed] of [['拿出', 1], ['上一页', 2], ['下一页', 2], ['收起', 2], ['待机', 1]]) {
+  for (const [name, speed] of [['拿出', 2], ['上一页', 4], ['下一页', 4], ['收起', 4], ['待机', 1]]) {
     pet.playNoteClip(name, name === '待机');
     assert.equal(pet.notePose.playbackRate, speed);
   }

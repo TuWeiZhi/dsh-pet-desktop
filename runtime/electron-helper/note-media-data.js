@@ -8,7 +8,9 @@ window.PetNoteMedia = {
   fps: 24,
   paper: { x: 167, y: 248, w: 306, h: 155 },
   transitionDuration: .18,
+  openingTransitionDuration: .35,
+  closingTransitionDuration: .35,
   readableAt: 3.5,
   closeEnd: 5,
-  playbackRates: { '拿出': 1, '待机': 1, '上一页': 2, '下一页': 2, '收起': 2 },
+  playbackRates: { '拿出': 2, '待机': 1, '上一页': 4, '下一页': 4, '收起': 4 },
 };
