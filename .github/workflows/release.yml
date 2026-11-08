@@ -35,6 +35,9 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 模型列表与设置回归测试
+        run: node --experimental-strip-types --test src/standalone/ai-models.test.cjs src/standalone/settings.test.ts
+
       - name: 构建 NSIS 安装程序
         # --publish never：tag 触发时 electron-builder 会「隐式发布」到 GitHub Releases，
         # 但它要 GH_TOKEN 而这里不需要（上传交给下一步的 action-gh-release）。

@@ -567,7 +567,7 @@ function createPetWindows() {
           bridge: BRIDGE ? '1' : '0',
           // 工具项「打开网站」的文案按宿主形态自动变（见 sprite.js）：desktop=唤起桌面应用 / site=打开站点
           openTarget: OPEN_TARGET,
-          // 独立桌面版：渲染端右键首项显示「AI 设置」（渲染端没有 process.env，只能走 query）
+          // 独立桌面版：渲染端右键首项显示「设置」（渲染端没有 process.env，只能走 query）
           settingsMenu: STANDALONE_DESKTOP ? '1' : '0',
           scale: String(scale),
           petIndex: String(pet.index),
@@ -745,7 +745,7 @@ function traySetPetDisplay(id, display) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 独立桌面版（本 fork 打出的 exe）：托盘补「AI 设置」与「退出桌宠」两项。
+// 独立桌面版（本 fork 打出的 exe）：托盘补「设置」与「退出桌宠」两项。
 // DSH 插件形态下这两件事由 DSH 自己的 UI 负责，所以上游没有；装成独立应用后
 // 托盘是唯一的常驻入口，没有退出项就只能去任务管理器杀进程。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -853,20 +853,20 @@ async function startTray() {
       resume: () => resumeNoteWindows(BrowserWindow.getAllWindows()),
       onChange: () => { if (trayMenu) controls.refresh(trayMenu); },
     }) : null;
-    const appItems = STANDALONE_DESKTOP
+    const trayItems = STANDALONE_DESKTOP
       ? [
-          ...(petItems.length ? [{ type: 'separator' }] : []),
           ...(SETTINGS_URL
-            ? [{ label: 'AI 设置', click: () => void shell.openExternal(SETTINGS_URL) }]
+            ? [{ label: '设置', click: () => void shell.openExternal(SETTINGS_URL) }]
             : []),
+          ...(petItems.length ? [{ type: 'separator' }, ...petItems] : []),
           ...controls.items(),
           { type: 'separator' },
           { label: '退出桌宠', click: () => requestAppQuit() },
         ]
-      : [];
+      : petItems;
     tray = new Tray(trayIcon());
     tray.setToolTip('dsh-pet 桌面宠物');
-    trayMenu = Menu.buildFromTemplate([...petItems, ...appItems]);
+    trayMenu = Menu.buildFromTemplate(trayItems);
     tray.setContextMenu(trayMenu);
     tray.on('right-click', () => controls?.refresh(trayMenu));
     controls?.start();

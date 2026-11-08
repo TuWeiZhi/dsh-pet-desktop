@@ -149,7 +149,7 @@ async function run(logger: StandaloneLogger, options: { port: number }): Promise
       : `  桌面小窗    ${desktopVisible.length} 只`,
     ai.isReady()
       ? '  AI          本机 API 已启用；自动碎碎念遵循设置页开关'
-      : '  AI          未配置或未启用，不发送模型请求；右键“打开 AI 设置”后在本机填写',
+      : '  AI          未配置或未启用，不发送模型请求；右键“设置”后配置模型连接',
     '  不可用      余额 / 会话工作状态 / DSH 系统通知',
     '  退出        Ctrl+C，或 POST /shutdown',
     '',

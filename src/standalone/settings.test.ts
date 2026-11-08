@@ -59,7 +59,7 @@ test('settings shell is accessible, self contained, and never saves browser secr
   assert.match(settingsStyle, /focus-visible/);
 });
 
-test('settings browser script strips fragment, keeps key write-only and explicitly clears without AI requests', async () => {
+test('settings browser script strips fragment, keeps key write-only and clears without model requests', async () => {
   const { runInNewContext } = await import('node:vm');
   type Element = {
     value: string;
@@ -70,6 +70,11 @@ test('settings browser script strips fragment, keeps key write-only and explicit
     listeners: Record<string, (event?: unknown) => Promise<void> | void>;
     addEventListener: (name: string, fn: (event?: unknown) => Promise<void> | void) => void;
     reportValidity: () => boolean;
+    checkValidity: () => boolean;
+    options: unknown[];
+    setAttribute: () => void;
+    replaceChildren: (...options: unknown[]) => void;
+    appendChild: (option: unknown) => void;
   };
   const elements = new Map<string, Element>();
   const element = (id: string): Element => {
@@ -82,9 +87,15 @@ test('settings browser script strips fragment, keeps key write-only and explicit
         dataset: {},
         listeners: {},
         addEventListener(name, fn) {
-          this.listeners[name] = fn;
+          const previous = this.listeners[name];
+          this.listeners[name] = event => { previous?.(event); return fn(event); };
         },
         reportValidity: () => true,
+        checkValidity: () => true,
+        options: [],
+        setAttribute() {},
+        replaceChildren(...options) { this.options = options; },
+        appendChild(option) { this.options.push(option); },
       });
     return elements.get(id)!;
   };
@@ -92,23 +103,26 @@ test('settings browser script strips fragment, keeps key write-only and explicit
     [];
   let stripped = '';
   runInNewContext(settingsScript, {
-    URLSearchParams,
+    URLSearchParams, AbortController,
     location: { hash: '#token=process-capability', pathname: '/standalone-ai/' },
     history: {
       replaceState: (_a: unknown, _b: unknown, path: string) => {
         stripped = path;
       },
     },
-    document: { getElementById: element },
+    document: { getElementById: element, createElement: () => ({}) },
     fetch: async (url: string, options: { method: string; body?: string; headers: Record<string, string> }) => {
       requests.push({ url, options });
+      if (url.endsWith('/models')) return { ok: true, json: async () => ({
+        ok: true, models: [{ id: 'x', name: 'x' }], message: '已获取模型',
+      }) };
       return {
         ok: true,
         json: async () => ({
           protocol: 'anthropic',
           baseUrl: 'https://example.test',
           model: 'x',
-          hasKey: true,
+          hasKey: !JSON.parse(options.body || '{}').clearApiKey,
           enabled: true,
           automaticWhispers: false,
           whisperIntervalSec: 300,
@@ -124,19 +138,22 @@ test('settings browser script strips fragment, keeps key write-only and explicit
   element('apiKey').value = 'write-only-fake-key';
   await element('settings').listeners.submit({ preventDefault() {} });
   assert.equal(element('apiKey').value, '');
-  assert.equal(JSON.parse(requests[1].options.body ?? '{}').apiKey, 'write-only-fake-key');
+  const writes = () => requests.filter(({ url, options }) => url.endsWith('/settings') && options.method === 'POST');
+  assert.equal(JSON.parse(writes()[0].options.body ?? '{}').apiKey, 'write-only-fake-key');
   element('clearApiKey').checked = true;
   element('clearApiKey').listeners.change();
   assert.equal(element('enabled').checked, false);
   assert.equal(element('apiKey').disabled, true);
+  const modelRequests = requests.filter(({ url }) => url.endsWith('/models')).length;
   await element('settings').listeners.submit({ preventDefault() {} });
-  assert.equal(JSON.parse(requests[2].options.body ?? '{}').clearApiKey, true);
-  assert.equal(JSON.parse(requests[2].options.body ?? '{}').enabled, false);
+  assert.equal(JSON.parse(writes()[1].options.body ?? '{}').clearApiKey, true);
+  assert.equal(JSON.parse(writes()[1].options.body ?? '{}').enabled, false);
+  assert.equal(requests.filter(({ url }) => url.endsWith('/models')).length, modelRequests);
   assert.equal(element('apiKey').disabled, false);
   assert.ok(
     requests.every(
       ({ url, options }) =>
-        url === '/standalone-ai/settings' && options.headers['X-DSH-Pet-Token'] === 'process-capability',
+        ['/standalone-ai/settings', '/standalone-ai/models'].includes(url) && options.headers['X-DSH-Pet-Token'] === 'process-capability',
     ),
   );
 });

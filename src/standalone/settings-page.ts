@@ -9,11 +9,12 @@ export const settingsPage = `<!doctype html>
 <fieldset><legend>模型连接</legend>
 <label for="protocol">接口协议</label><select id="protocol" name="protocol"><option value="openai-compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select>
 <label for="baseUrl">接口地址（Base URL）</label><input id="baseUrl" name="baseUrl" type="url" placeholder="https://example.com/v1" maxlength="2048" spellcheck="false" aria-describedby="endpoint-note"><p class="hint" id="endpoint-note">填写服务商提供的基础接口地址（支持 HTTP 与 HTTPS，通常以 /v1 结尾）。不要把密钥放进地址。</p>
-<label for="model">模型名称</label><input id="model" name="model" type="text" maxlength="200" placeholder="填写服务商的模型 ID，例如 deepseek-chat" spellcheck="false">
 <div class="key-heading"><label for="apiKey">API 密钥</label><span id="key-state" class="hint">尚未读取</span></div>
 <input id="apiKey" name="apiKey" type="password" autocomplete="new-password" maxlength="8192" placeholder="留空保留已保存的密钥" aria-describedby="key-note">
 <p id="key-note" class="hint">密钥只写入本机配置，不会回显。留空不会删除旧密钥。</p>
 <label class="check clear"><input id="clearApiKey" type="checkbox">清除已保存的密钥，并关闭 AI</label>
+<label for="model">模型名称</label><div class="model-row"><select id="model" name="model" disabled aria-describedby="models-note"><option value="">请先获取模型列表</option></select><button id="models-btn" type="button" disabled>获取模型</button></div>
+<p id="models-note" class="hint" role="status" aria-live="polite">填写接口地址和密钥后获取模型，再从下拉框选择。</p>
 <label class="check enabled"><input id="enabled" type="checkbox">启用 AI 对话</label>
 <div class="test-row"><button id="test-btn" type="button">测试连接</button><span id="test-result" class="test-result" role="status" aria-live="polite"></span></div>
 </fieldset>
@@ -29,6 +30,8 @@ export const settingsPage = `<!doctype html>
 </form><noscript>需要启用 JavaScript 才能保存设置。请从桌宠菜单打开本页。</noscript></main></body></html>`;
 
 export const settingsStyle = `
+.model-row{display:flex;align-items:center;gap:10px}.model-row select{flex:1;min-width:0}.model-row button{flex-shrink:0}#models-note[data-error=true]{color:#a13b30}select:disabled{background:#f2f5f7;color:var(--muted)}
+@media(max-width:560px){.model-row{align-items:stretch;flex-direction:column}}
 :root{color-scheme:light;--ink:#203b4b;--muted:#526a78;--blue:#12618b;--line:#cbdce5;--paper:#fff;--water:#edf5fa}
 *{box-sizing:border-box}body{margin:0;background:var(--water);color:var(--ink);font:16px/1.6 "Microsoft YaHei UI","PingFang SC",sans-serif}
 main{max-width:720px;margin:48px auto;padding:0 24px 32px}header{padding:0 12px 28px}.fish{display:block;font:700 29px/1.3 Georgia,serif;color:var(--blue);letter-spacing:2px;margin-bottom:24px}.local{font-size:13px;color:var(--muted);margin:0 0 10px}h1{font-size:32px;line-height:1.3;letter-spacing:-1px;margin:0 0 16px;font-weight:700}.intro{margin:0;color:var(--muted)}
@@ -48,6 +51,122 @@ export const settingsScript = `
   const save = get('save');
   const testBtn = get('test-btn');
   const testResult = get('test-result');
+
+  const modelBox = get('model');
+  const modelsBtn = get('models-btn');
+  const modelsNote = get('models-note');
+  let hasStoredKey = false;
+  let modelRequest = 0;
+  let modelController = null;
+
+  function modelMessage(text, error = false) {
+    modelsNote.textContent = text;
+    modelsNote.dataset.error = String(error);
+  }
+
+  function showModels(models, selected = '') {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = models.length ? '请选择模型' : '请先获取模型列表';
+    modelBox.replaceChildren(placeholder);
+    for (const model of models) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.name === model.id ? model.id : model.name + '（' + model.id + '）';
+      modelBox.appendChild(option);
+    }
+    modelBox.value = models.some(model => model.id === selected) ? selected : '';
+    modelBox.disabled = models.length === 0;
+  }
+
+  function canFetchModels() {
+    return !!get('baseUrl').value.trim() && get('baseUrl').checkValidity() &&
+      !get('clearApiKey').checked && (!!get('apiKey').value.trim() || hasStoredKey);
+  }
+
+  function cancelModelRequest() {
+    modelRequest += 1;
+    if (modelController) modelController.abort();
+    modelController = null;
+    modelBox.setAttribute('aria-busy', 'false');
+    modelsBtn.textContent = '获取模型';
+    modelsBtn.disabled = !token || get('clearApiKey').checked;
+  }
+
+  function invalidateModels() {
+    cancelModelRequest();
+    showModels([]);
+    modelMessage('连接信息已修改，请重新获取模型列表。');
+  }
+
+  async function loadModels() {
+    cancelModelRequest();
+    if (!canFetchModels()) {
+      modelMessage('请先填写有效的接口地址和 API 密钥；已保存的密钥可留空。', true);
+      return;
+    }
+    const requestId = modelRequest;
+    const selected = modelBox.value;
+    modelController = new AbortController();
+    modelsBtn.disabled = true;
+    modelsBtn.textContent = '正在获取…';
+    modelBox.disabled = true;
+    modelBox.setAttribute('aria-busy', 'true');
+    modelMessage('正在获取可用模型…');
+    try {
+      const response = await fetch('/standalone-ai/models', {
+        method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
+        signal: modelController.signal,
+        headers: { 'X-DSH-Pet-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocol: get('protocol').value,
+          baseUrl: get('baseUrl').value.trim(),
+          apiKey: get('apiKey').value.trim(),
+          clearApiKey: get('clearApiKey').checked
+        })
+      });
+      if (response.status === 403) throw new Error('打开凭据已失效，请从桌宠菜单重新打开设置。');
+      const data = await response.json();
+      if (requestId !== modelRequest) return;
+      if (!response.ok || !data.ok) throw new Error(data.message || data.error || '获取模型失败，请重试。');
+      showModels(data.models, selected);
+      modelMessage(data.message, data.models.length === 0);
+    } catch (error) {
+      if (requestId !== modelRequest) return;
+      modelMessage(error.message || '获取模型失败，请检查连接后重试。', true);
+    } finally {
+      if (requestId === modelRequest) {
+        modelController = null;
+        modelsBtn.disabled = false;
+        modelsBtn.textContent = '获取模型';
+        modelBox.disabled = modelBox.options.length <= 1;
+        modelBox.setAttribute('aria-busy', 'false');
+      }
+    }
+  }
+
+  function populateModels(data) {
+    cancelModelRequest();
+    hasStoredKey = data.hasKey === true;
+    showModels(data.model ? [{ id: data.model, name: data.model }] : [], data.model);
+    modelMessage('填写接口地址和密钥后获取模型，再从下拉框选择。');
+    if (canFetchModels()) void loadModels();
+  }
+
+  modelsBtn.addEventListener('click', loadModels);
+  for (const id of ['baseUrl', 'apiKey']) {
+    get(id).addEventListener('input', invalidateModels);
+    get(id).addEventListener('change', () => { if (canFetchModels()) void loadModels(); });
+  }
+  get('protocol').addEventListener('change', () => {
+    invalidateModels();
+    if (canFetchModels()) void loadModels();
+  });
+  get('clearApiKey').addEventListener('change', () => {
+    invalidateModels();
+    if (canFetchModels()) void loadModels();
+  });
+
   function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
   async function request(method, body) {
     const response = await fetch('/standalone-ai/settings', {
@@ -63,13 +182,14 @@ export const settingsScript = `
     return response.json();
   }
   function populate(data) {
-    for (const id of ['protocol','baseUrl','model','whisperIntervalSec','maxTokens']) {
+    for (const id of ['protocol','baseUrl','whisperIntervalSec','maxTokens']) {
       if (data[id] !== undefined) get(id).value = String(data[id]);
     }
     for (const id of ['enabled','automaticWhispers']) get(id).checked = data[id] === true;
     get('key-state').textContent = data.hasKey ? '已保存 · 不回显' : '尚未设置';
     get('apiKey').value = '';
     get('clearApiKey').checked = false;
+    populateModels(data);
   }
   get('clearApiKey').addEventListener('change', () => {
     get('apiKey').disabled = get('clearApiKey').checked;
@@ -126,6 +246,7 @@ export const settingsScript = `
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
+    if (get('enabled').checked && !modelBox.value) { message('请先获取并选择模型。', true); return; }
     save.disabled = true;
     message('正在保存到本机…');
     const input = {

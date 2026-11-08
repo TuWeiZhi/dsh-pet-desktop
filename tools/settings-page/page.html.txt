@@ -29,11 +29,12 @@
 <p class="hint">只用于右键菜单里的「对话」。不填也能正常显示桌宠、碎碎念与互动。</p>
 <label for="protocol">接口协议</label><select id="protocol" name="protocol"><option value="openai-compatible">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select>
 <label for="baseUrl">接口地址（Base URL）</label><input id="baseUrl" name="baseUrl" type="url" placeholder="https://example.com/v1" maxlength="2048" spellcheck="false" aria-describedby="endpoint-note"><p class="hint" id="endpoint-note">填写服务商提供的基础接口地址（支持 HTTP 与 HTTPS，通常以 /v1 结尾）。不要把密钥放进地址。</p>
-<label for="model">模型名称</label><input id="model" name="model" type="text" maxlength="200" placeholder="填写服务商的模型 ID，例如 deepseek-chat" spellcheck="false">
 <div class="key-heading"><label for="apiKey">API 密钥</label><span id="key-state" class="hint">尚未读取</span></div>
 <input id="apiKey" name="apiKey" type="password" autocomplete="new-password" maxlength="8192" placeholder="留空保留已保存的密钥" aria-describedby="key-note">
 <p id="key-note" class="hint">密钥只写入本机配置，不会回显。留空不会删除旧密钥。</p>
 <label class="check clear"><input id="clearApiKey" type="checkbox">清除已保存的密钥，并关闭 AI</label>
+<label for="model">模型名称</label><div class="model-row"><select id="model" name="model" disabled aria-describedby="models-note"><option value="">请先获取模型列表</option></select><button id="models-btn" type="button" disabled>获取模型</button></div>
+<p id="models-note" class="hint" role="status" aria-live="polite">填写接口地址和密钥后获取模型，再从下拉框选择。</p>
 <label class="check enabled"><input id="enabled" type="checkbox">启用 AI 对话</label>
 <div class="test-row"><button id="test-btn" type="button">测试连接</button><span id="test-result" class="test-result" role="status" aria-live="polite"></span></div>
 </fieldset>

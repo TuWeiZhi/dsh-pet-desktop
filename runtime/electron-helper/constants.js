@@ -35,7 +35,7 @@ const BRIDGE = params.get('bridge') === '1';
 // desktop = 宿主是 DSH 桌面应用，菜单项改叫「打开软件」并唤起桌面应用主窗口；site = 打开站点。
 const OPEN_TARGET = params.get('openTarget') === 'desktop' ? 'desktop' : 'site';
 // 独立桌面版（本 fork 的 exe 形态，宿主经 query 注入 settingsMenu=1）：右键首项从「打开网站」
-// 改成「AI 设置」，点开的是本机 http://127.0.0.1:<port>/standalone-ai/ 设置页。
+// 改成「设置」，点开的是本机 http://127.0.0.1:<port>/standalone-ai/ 设置页。
 // 渲染端没有 node 的 process.env（contextIsolation + nodeIntegration:false），所以只能走 query。
 const SETTINGS_MENU = params.get('settingsMenu') === '1';
 // 视口 = 全部显示器工作区的外接矩形（多显示器时即整个桌面；窗口只是宠物的一块局部画布）。

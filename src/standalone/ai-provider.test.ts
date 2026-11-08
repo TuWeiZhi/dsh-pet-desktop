@@ -327,7 +327,7 @@ test('testConnection checks parameters and reports success or friendly error', a
       });
       assert.deepEqual(await ai.testConnection({ baseUrl: 'https://example.test/v1', model: '', apiKey: 'k' }), {
         ok: false,
-        message: '请先填写模型名称',
+        message: '请先获取并选择模型',
       });
       await ai.saveSettings({ clearApiKey: true, enabled: false });
       assert.deepEqual(await ai.testConnection({ baseUrl: 'https://example.test/v1', model: 'm', apiKey: '' }), {

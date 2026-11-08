@@ -48,21 +48,29 @@ for (const [label, config] of [['source', sourceConfig], ['desktop release', des
   });
 }
 
-function settingsFixture() {
+function settingsFixture(aiSettings: Record<string, unknown> = { protocol: 'anthropic', model: 'test' },
+  modelResponse: (body: any) => Promise<any> = async () => ({ ok: true, models: [], message: '暂无模型' })) {
   const elements = new Map<string, any>();
   const element = (id: string) => {
     if (!elements.has(id)) elements.set(id, { value: '', checked: false, disabled: id === 'save', textContent: '',
-      dataset: {}, listeners: {}, reportValidity: () => true,
-      addEventListener(name: string, fn: unknown) { this.listeners[name] = fn; } });
+      dataset: {}, listeners: {}, options: [], reportValidity: () => true, checkValidity: () => true,
+      setAttribute() {},
+      replaceChildren(...options: unknown[]) { this.options = options; },
+      appendChild(option: unknown) { this.options.push(option); },
+      addEventListener(name: string, fn: any) {
+        const previous = this.listeners[name];
+        this.listeners[name] = (event: unknown) => { previous?.(event); return fn(event); };
+      } });
     return elements.get(id);
   };
   let resolveConfig!: (value: unknown) => void;
   const pendingConfig = new Promise(resolve => { resolveConfig = resolve; });
   const writes: string[] = [];
   runInNewContext(fs.readFileSync(new URL('../../tools/settings-page/script.js.txt', import.meta.url), 'utf8'), {
-    URLSearchParams, location: { hash: '#token=test', pathname: '/standalone-ai/' },
-    history: { replaceState() {} }, document: { getElementById: element },
+    URLSearchParams, AbortController, location: { hash: '#token=test', pathname: '/standalone-ai/' },
+    history: { replaceState() {} }, document: { getElementById: element, createElement: () => ({}) },
     fetch: async (url: string, options: { method: string; body?: string }) => {
+      if (url.endsWith('/models')) return { ok: true, json: () => modelResponse(JSON.parse(options.body!)) };
       if (options.method !== 'GET') writes.push(url);
       if (url.endsWith('/config') && options.method === 'PUT') {
         const clean = desktopConfig.saveUserConfig(JSON.parse(options.body!));
@@ -70,7 +78,8 @@ function settingsFixture() {
         return { ok: true, json: async () => ({ main: clean }) };
       }
       if (url.endsWith('/config')) return pendingConfig;
-      return { ok: true, json: async () => ({ protocol: 'anthropic', model: 'test' }) };
+      if (options.method === 'POST') aiSettings = { ...aiSettings, ...JSON.parse(options.body!), hasKey: true };
+      return { ok: true, json: async () => aiSettings };
     },
   });
   return { element, resolveConfig, writes };
@@ -114,4 +123,64 @@ test('failed pet configuration load keeps saving disabled and retains the error'
   assert.equal(element('status').dataset.error, 'true');
   await element('settings').listeners.submit({ preventDefault() {} });
   assert.deepEqual(writes, []);
+});
+
+test('model picker loads with the saved key, preserves selection and saves the selected ID', async () => {
+  const calls: any[] = [];
+  const { element, resolveConfig } = settingsFixture({
+    protocol: 'openai-compatible', baseUrl: 'https://example.test/v1', model: 'saved-model', hasKey: true,
+  }, async body => {
+    calls.push(body);
+    return { ok: true, message: '已获取 2 个模型', models: [
+      { id: 'saved-model', name: 'Saved' }, { id: 'new-model', name: 'New' },
+    ] };
+  });
+  resolveConfig({ ok: true, json: async () => ({ main: { pets: [{ id: 'main', name: 'pet', size: 462,
+    position: { corner: 'bottom-right', marginX: 12, marginY: 34 } }] } }) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls[0].apiKey, '');
+  assert.equal(element('model').value, 'saved-model');
+  assert.equal(element('model').options.length, 3);
+  assert.equal(element('model').disabled, false);
+  element('model').value = 'new-model';
+  await element('settings').listeners.submit({ preventDefault() {} });
+  assert.equal(element('model').value, 'new-model');
+  assert.equal(element('status').textContent, '已保存到本机。');
+  assert.equal(element('apiKey').value, '');
+});
+
+test('model picker ignores stale results, reports errors and retries without retaining another connection model', async () => {
+  let finishOld!: (value: unknown) => void;
+  const oldResponse = new Promise(resolve => { finishOld = resolve; });
+  const { element } = settingsFixture({ protocol: 'openai-compatible', model: '' }, async body => {
+    if (body.baseUrl.includes('old')) return oldResponse;
+    if (body.apiKey === 'wrong') return { ok: false, message: '身份验证失败' };
+    return { ok: true, message: '已获取 1 个模型', models: [{ id: 'new-model', name: 'New' }] };
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  element('baseUrl').value = 'https://old.example/v1';
+  element('apiKey').value = 'new-key';
+  const loading = element('models-btn').listeners.click();
+  assert.equal(element('models-btn').disabled, true);
+  element('baseUrl').value = 'https://new.example/v1';
+  element('baseUrl').listeners.input();
+  await element('models-btn').listeners.click();
+  finishOld({ ok: true, models: [{ id: 'old-model', name: 'Old' }], message: 'old result' });
+  await loading;
+  assert.deepEqual(element('model').options.map((option: any) => option.value), ['', 'new-model']);
+  element('model').value = 'new-model';
+  element('apiKey').value = 'wrong';
+  element('apiKey').listeners.input();
+  assert.equal(element('model').value, '');
+  await element('models-btn').listeners.click();
+  assert.equal(element('models-note').dataset.error, 'true');
+  assert.equal(element('models-btn').disabled, false);
+  assert.equal(element('model').disabled, true);
+  element('apiKey').value = 'correct';
+  await element('models-btn').listeners.click();
+  assert.equal(element('model').disabled, false);
+  element('clearApiKey').checked = true;
+  element('clearApiKey').listeners.change();
+  assert.equal(element('model').value, '');
+  assert.equal(element('models-btn').disabled, true);
 });

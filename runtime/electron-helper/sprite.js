@@ -1942,11 +1942,11 @@ class PetSprite {
     // 桌面专属工具根项（打开网站 / 查看余额 / 碎碎念 / 对话 / 回到初始位置 / 重载配置）+ 共享菜单树（动作→分类→具体动画）
     // 碎碎念/对话项无条件显示：手动触发不受 whisperEnabled 限制（该字段只影响自动周期轮询）
     // 首项文案随宿主形态变（OPEN_TARGET）：宿主是 DSH 桌面应用时点是"唤起桌面应用窗口"，仍叫「打开网站」会误导
-    // DSH_PET_SETTINGS_MENU=1（本 fork 的独立桌面版）：这一项打开的是本机「桌宠 AI 设置」页，直说
+    // DSH_PET_SETTINGS_MENU=1（本 fork 的独立桌面版）：这一项打开本机「桌宠设置」页。
     // 渲染端拿不到 process.env（contextIsolation + nodeIntegration:false），标志由 constants.js 从 query 读出
     const tools = [
       {
-        label: SETTINGS_MENU ? 'AI 设置' : OPEN_TARGET === 'desktop' ? '打开软件' : '打开网站',
+        label: SETTINGS_MENU ? '设置' : OPEN_TARGET === 'desktop' ? '打开软件' : '打开网站',
         action: 'open-site',
         hint: OPEN_SHORTCUT_HINT,
       },

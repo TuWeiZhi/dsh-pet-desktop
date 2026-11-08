@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import type { ModelListResult } from './ai-models';
 
 /** No backend import: mocks and standalone HTTP can be exercised without any AI client. */
 export interface StandaloneSettingsService {
   getSettings(): unknown;
   saveSettings(input: unknown): Promise<unknown>;
+  fetchModels?(input: unknown): Promise<ModelListResult>;
   testConnection?(input: {
     protocol?: string;
     baseUrl?: string;

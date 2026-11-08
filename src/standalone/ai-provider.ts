@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { StandaloneLogger } from './context';
 import { createAiConfig } from './ai-config';
+import { fetchAvailableModels } from './ai-models';
+import type { ModelListResult } from './ai-models';
 import type { StandaloneAiPublicSettings } from './ai-config';
 import { isAuthenticationFailure, isRateLimitFailure, sdkTextStream } from './ai-transport';
 import type { AiFetch, AiRequest, AiTransportEvent } from './ai-transport';
@@ -36,6 +38,7 @@ export interface StandaloneAiService {
   stream(options: unknown): AsyncIterable<{ type: 'text'; text: string }>;
   getSettings(): StandaloneAiPublicSettings;
   saveSettings(input: unknown): Promise<StandaloneAiPublicSettings>;
+  fetchModels(input: unknown): Promise<ModelListResult>;
   testConnection(input: {
     protocol?: string;
     baseUrl?: string;
@@ -222,6 +225,10 @@ export function createStandaloneAi(
       }
     },
     isReady: ready,
+    async fetchModels(input) {
+      if (disposed) return { ok: false, message: '服务已关闭' };
+      return fetchAvailableModels(input, store.current(), fetcher);
+    },
     async testConnection(input: { protocol?: string; baseUrl?: string; model?: string; apiKey?: string }) {
       if (disposed) return { ok: false, message: '服务已关闭' };
       const current = store.current();
@@ -234,7 +241,7 @@ export function createStandaloneAi(
         return { ok: false, message: '请先填写接口地址（Base URL）' };
       }
       if (!model) {
-        return { ok: false, message: '请先填写模型名称' };
+        return { ok: false, message: '请先获取并选择模型' };
       }
       if (!apiKey) {
         return { ok: false, message: '请先填写 API 密钥' };

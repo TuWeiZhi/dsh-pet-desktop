@@ -105,8 +105,9 @@ function settingsHandler(
   };
 }
 
-function testHandler(
+function connectionHandler(
   ai: StandaloneSettingsService | undefined,
+  action: 'testConnection' | 'fetchModels',
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     if (req.method !== 'POST') {
@@ -122,11 +123,11 @@ function testHandler(
       });
       const bodyStr = Buffer.concat(chunks).toString('utf8');
       const input = bodyStr ? JSON.parse(bodyStr) : {};
-      if (ai?.testConnection) {
-        const result = await ai.testConnection(input);
+      if (ai?.[action]) {
+        const result = await ai[action](input);
         sendJson(res, 200, result);
       } else {
-        sendJson(res, 200, { ok: false, message: '当前环境未配置测试能力' });
+        sendJson(res, 200, { ok: false, message: '当前环境未配置模型连接能力' });
       }
     } catch {
       sendJson(res, 400, { ok: false, message: '请求格式无效' });
@@ -139,7 +140,8 @@ function dispatch(
   shutdownSecurity?: RequestSecurity,
 ): (req: IncomingMessage, res: ServerResponse, pathname: string) => void {
   const settings = settingsHandler(options.ai);
-  const tester = testHandler(options.ai);
+  const tester = connectionHandler(options.ai, 'testConnection');
+  const models = connectionHandler(options.ai, 'fetchModels');
   return (req, res, pathname) => {
     const method = req.method ?? 'GET';
     if (method === 'OPTIONS') {
@@ -195,6 +197,10 @@ function dispatch(
     }
     if (pathname === '/standalone-ai/test') {
       void tester(req, res).catch((error: unknown) => fail(res, error, options.logger));
+      return;
+    }
+    if (pathname === '/standalone-ai/models') {
+      void models(req, res).catch((error: unknown) => fail(res, error, options.logger));
       return;
     }
     const route = options.routes.find((candidate) => matches(candidate, pathname));
