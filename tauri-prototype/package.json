@@ -1,0 +1,15 @@
+{
+  "name": "dsh-pet-tauri-prototype",
+  "version": "0.7.7",
+  "private": true,
+  "scripts": {
+    "prepare:frontend": "node prepare.mjs",
+    "dev": "tauri dev",
+    "build": "tauri build --bundles nsis",
+    "test": "node --test test/*.test.cjs",
+    "package:release": "node package-release.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.9.5"
+  }
+}

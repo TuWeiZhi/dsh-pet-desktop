@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "dsh-pet-tauri",
+  "version": "0.7.7",
+  "identifier": "com.tuweizhi.dshpet.tauri-prototype",
+  "build": {
+    "beforeDevCommand": "node prepare.mjs",
+    "beforeBuildCommand": "node prepare.mjs",
+    "frontendDist": "../shell"
+  },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../../build/icon.ico"],
+    "resources": { "../web/": "web/" },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "languages": ["SimpChinese", "English"], "displayLanguageSelector": false, "installerHooks": "installer-hooks.nsh" }
+    }
+  }
+}

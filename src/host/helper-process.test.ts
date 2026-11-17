@@ -9,8 +9,9 @@
  * 用 Node 内置 test runner（node:test），不引入任何 npm 依赖：
  *   node --experimental-strip-types --test src/host/helper-process.test.ts
  */
-import { test, describe, afterEach } from 'node:test';
+import { test, describe, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import Module from 'node:module';
 import { EventEmitter, once } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -66,6 +67,15 @@ function withIsolatedHome(fn: (dir: string) => void): void {
     else process.env.DSH_PET_ELECTRON_PATH = savedPath;
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** These cases simulate a machine without the development Electron package. */
+function withoutInstalledElectron(t: TestContext): void {
+  const original = Module.prototype.require;
+  t.mock.method(Module.prototype, 'require', function (id: string) {
+    if (id === 'electron') throw new Error('Electron is not installed');
+    return original.call(this, id);
+  });
 }
 
 describe('dshHomeDir —— $DSH_HOME 解析', () => {
@@ -128,7 +138,8 @@ describe('resolveElectronPath —— 候选优先级', () => {
     });
   });
 
-  test('一个都不存在时返回 undefined', () => {
+  test('一个都不存在时返回 undefined', (t) => {
+    withoutInstalledElectron(t);
     withIsolatedHome((dir) => {
       assert.equal(resolveElectronPath([join(dir, 'missing-1.exe'), join(dir, 'missing-2.exe')]), undefined);
     });
@@ -150,7 +161,8 @@ describe('resolveElectronPath —— 候选优先级', () => {
     });
   });
 
-  test('$DSH_HOME/electron 落地路径在本地候选中（隔离 DSH_HOME 时可命中）', () => {
+  test('$DSH_HOME/electron 落地路径在本地候选中（隔离 DSH_HOME 时可命中）', (t) => {
+    withoutInstalledElectron(t);
     withIsolatedHome((dir) => {
       process.env.DSH_HOME = join(dir, 'dshhome');
       const rel =

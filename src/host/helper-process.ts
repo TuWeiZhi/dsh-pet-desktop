@@ -16,7 +16,6 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { downloadArtifact } from '@electron/get';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -178,6 +177,8 @@ export interface EnsureElectronOptions {
  * 已存在则原样返回；失败返回 undefined（不影响 DSH 与浏览器 overlay）。
  */
 export async function ensureElectronDownload(options: EnsureElectronOptions = {}): Promise<string | undefined> {
+  // The desktop installer includes Electron. Download helpers are development-only dependencies.
+  if (process.env.DSH_PET_DESKTOP_APP === '1') return resolveElectronPath();
   const version = options.version || process.env.DSH_PET_ELECTRON_VERSION || '43.3.0';
   const mirror = options.mirror || process.env.DSH_PET_ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/';
   const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
@@ -219,6 +220,7 @@ export async function ensureElectronDownload(options: EnsureElectronOptions = {}
     try {
       // 目录创建也可能失败（权限不足、同名文件等），与下载失败一样降级到浏览器宠物。
       mkdirSync(targetDir, { recursive: true });
+      const { downloadArtifact } = await import('@electron/get');
       // 官方 @electron/get 下载：负责 URL 拼装、镜像、SHA256 校验（sumchecker）、下载缓存
       // （同一版本只下载一次，之后命中缓存秒回）。超时用 AbortController 传给 fetch。
       const zipPath = await downloadArtifact({

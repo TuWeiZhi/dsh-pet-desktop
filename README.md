@@ -1,5 +1,7 @@
 # dsh-pet 桌面版（独立 exe，不依赖 DSH）
 
+Tauri 完整版已在 [`tauri-prototype/`](tauri-prototype/README.md) 中接入原有设置、AI、托盘、自启与更新逻辑。它复用原前端和素材，采用系统 WebView2 与随包 Node 后台；构建产物在 `dist/tauri-full/`，与 Electron 使用独立的更新安装包和清单。两种版本的数据目录独立。
+
 > **上游与许可**：本项目基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，并使用其桌宠动画等素材。代码采用 MIT 许可；上游素材禁止商用，角色形象遵循 CC BY-NC-SA 4.0。作者署名、修改说明和完整许可见 [NOTICE.md](NOTICE.md)。
 
 > **桌面版新增内容**：TuWeiZhi 开发和改进了独立安装、桌面便签、开机自启、应用内更新等功能，并提供便签姿势及动画素材。新增代码按 MIT 许可发布；新增角色形象演绎素材中 TuWeiZhi 享有权利的部分按 CC BY-NC-SA 4.0 发布，使用时须保留角色原作者署名并遵守非商业和相同方式共享条件。详见 [NOTICE.md](NOTICE.md)。
@@ -42,6 +44,8 @@ dist\win-unpacked\                # 免安装目录，调试用
 ```
 
 安装包内自带 Electron 43.3.0 运行时，**不联网下载**。
+
+发行包仅保留简体中文、繁体中文和英文的 Electron 语言资源，排除依赖中的 TypeScript 源码、类型声明与 source map；动画、图片和字体完整保留。Electron 下载、解压工具只作为开发依赖，独立桌面版使用自带的运行时，不进入下载流程。
 
 ### 用户侧行为
 

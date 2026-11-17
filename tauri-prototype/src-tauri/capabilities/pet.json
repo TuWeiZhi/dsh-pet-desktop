@@ -1,0 +1,6 @@
+{
+  "identifier": "pet-window",
+  "description": "The prototype uses only its own narrowly scoped native commands.",
+  "windows": ["pet-*"],
+  "permissions": []
+}

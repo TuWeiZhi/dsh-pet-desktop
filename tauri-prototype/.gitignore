@@ -1,0 +1,5 @@
+web/
+src-tauri/target/
+src-tauri/gen/
+evidence/
+node_modules/

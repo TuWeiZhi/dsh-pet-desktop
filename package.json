@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-desktop",
   "productName": "dsh-pet",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "吃白饭的蓝色大肥鱼，赖在你桌面上不走了。独立 Windows 桌面宠物（不依赖 DSH）。",
   "author": {
     "name": "TuWeiZhi"
@@ -23,12 +23,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
-    "@electron-internal/extract-zip": "^1.0.5",
-    "@electron/get": "^5.1.0",
     "openai": "7.39.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@electron-internal/extract-zip": "^1.0.5",
+    "@electron/get": "^5.1.0",
     "electron": "43.3.0",
     "electron-builder": "^26.18.0"
   },
@@ -36,6 +36,7 @@
     "appId": "com.tuweizhi.dshpet",
     "productName": "dsh-pet",
     "asar": false,
+    "electronLanguages": ["en-US", "zh-CN", "zh-TW"],
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -44,6 +45,7 @@
       "electron/**/*",
       "lib/**/*",
       "!lib/types/**",
+      "!node_modules/**/*.{map,ts,mts,cts}",
       "runtime/**/*",
       "assets/**/*",
       "!assets/note-layers/**",

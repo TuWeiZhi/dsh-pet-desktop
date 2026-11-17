@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.7] — Tauri 完整桌面版（2026-11-17）
+
+- Tauri 窗口接入原有 standalone 宿主，复用设置页、AI SDK、模型发现、对话记忆与宠物配置逻辑。
+- 补齐托盘显示开关、开机自启、多宠物状态/碰撞转发及显示器几何更新。
+- 设置与显示配置重启前刷新所有便签；保存失败保留进程和配置，防止未保存草稿丢失。
+- Tauri 更新使用独立安装包和 `tauri-update-manifest.json`，保留原下载、摘要校验、取消和安装前保存流程。
+- Tauri 保留原型的独立应用数据标识及便签，不自动覆盖 Electron 数据。
+
 本仓库基于上游 [`PC2005-cloud/dsh-pet`](https://github.com/PC2005-cloud/dsh-pet)，将运行时改造为 Windows 独立安装包，不再需要 DSH。本文件记录桌面版的变更。
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。

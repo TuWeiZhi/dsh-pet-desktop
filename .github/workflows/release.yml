@@ -1,6 +1,6 @@
 # 发版流水线：推一个 `v*` 形式的 tag，就会在这里构建 NSIS 安装包并挂到同名 Release 上。
 #
-# 为什么放在 CI 而不是本地：安装包 173 MB，本地构建产物不入库（见 .gitignore 的 dist/），
+# 为什么放在 CI 而不是本地：安装包等本地构建产物不入库（见 .gitignore 的 dist/），
 # 想让「代码 → 可下载的 exe」这条链可复现，就得有个干净的 Windows 环境跑一次。
 #
 # 注意：这里不签名（没有证书），Windows 首次运行会弹 SmartScreen 提示，属预期。
@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '24.22.1'
           cache: npm
 
       - name: 发版前自检
@@ -35,8 +35,8 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 模型列表与设置回归测试
-        run: node --experimental-strip-types --test src/standalone/ai-models.test.cjs src/standalone/settings.test.ts
+      - name: 运行时、模型列表与设置回归测试
+        run: node --experimental-strip-types --test src/host/helper-process.test.ts src/host/desktop-runtime.test.cjs src/standalone/ai-models.test.cjs src/standalone/settings.test.ts
 
       - name: 构建 NSIS 安装程序
         # --publish never：tag 触发时 electron-builder 会「隐式发布」到 GitHub Releases，
@@ -48,6 +48,19 @@ jobs:
       - name: 生成更新校验信息
         run: node tools/write-update-manifest.cjs
 
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建并验证完整 Tauri 版
+        working-directory: tauri-prototype
+        run: |
+          npm ci
+          npm run prepare:frontend
+          npm test
+          cargo test --manifest-path src-tauri/Cargo.toml
+          npm run build
+          npm run package:release
+
       - name: 挂到 Release
         uses: softprops/action-gh-release@v2
         with:
@@ -55,6 +68,8 @@ jobs:
             dist/dsh-pet-*-setup.exe
             dist/dsh-pet-*-setup.exe.blockmap
             dist/update-manifest.json
+            dist/tauri-full/dsh-pet-tauri-*-setup.exe
+            dist/tauri-full/tauri-update-manifest.json
           generate_release_notes: true
           body_path: .github/release-notes.md
           fail_on_unmatched_files: true
