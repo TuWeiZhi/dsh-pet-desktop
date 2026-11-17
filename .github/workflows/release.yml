@@ -51,15 +51,29 @@ jobs:
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
 
-      - name: 构建并验证完整 Tauri 版
+      - name: 安装 Tauri 构建依赖
         working-directory: tauri-prototype
-        run: |
-          npm ci
-          npm run prepare:frontend
-          npm test
-          cargo test --manifest-path src-tauri/Cargo.toml
-          npm run build
-          npm run package:release
+        run: npm ci
+
+      - name: 准备 Tauri 资源
+        working-directory: tauri-prototype
+        run: npm run prepare:frontend
+
+      - name: Tauri JavaScript 与归档回归测试
+        working-directory: tauri-prototype
+        run: npm test
+
+      - name: Tauri Rust 回归测试
+        working-directory: tauri-prototype
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: 构建 Tauri NSIS 安装包
+        working-directory: tauri-prototype
+        run: npm run build
+
+      - name: 归档 Tauri 发布产物
+        working-directory: tauri-prototype
+        run: npm run package:release
 
       - name: 挂到 Release
         uses: softprops/action-gh-release@v2

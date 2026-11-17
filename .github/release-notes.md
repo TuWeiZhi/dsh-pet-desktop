@@ -11,4 +11,6 @@
 
 ## 下载与升级
 
-Windows x64 用户可选择 `dsh-pet-tauri-0.7.7-setup.exe` 或 Electron 版 `dsh-pet-0.7.7-setup.exe`。两种版本各自检查对应安装包，数据目录独立；Tauri 不自动导入 Electron 配置和密钥，同架构升级默认保留配置和便签。Tauri 缺少 WebView2 时需联网补装，WebView2 不计入安装包体积。
+Windows x64 用户可选择 `dsh-pet-tauri-0.7.8-setup.exe` 或 Electron 版 `dsh-pet-0.7.8-setup.exe`。两种版本各自检查对应安装包，数据目录独立；Tauri 不自动导入 Electron 配置和密钥，同架构升级默认保留配置和便签。Tauri 缺少 WebView2 时需联网补装，WebView2 不计入安装包体积。
+
+`0.7.7` 的 CI 在便携目录归档阶段失败，未发布安装包；`0.7.8` 修正资源路径后完成该版本的发行，应用功能保持一致。

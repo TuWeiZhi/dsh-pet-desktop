@@ -13,7 +13,7 @@ const manifest={version,size:statSync(join(output,name)).size,sha256:hash(join(o
 writeFileSync(join(output,'tauri-update-manifest.json'),JSON.stringify(manifest)+'\n');
 const portable=join(output,'portable');mkdirSync(portable,{recursive:true});
 cpSync(join(release,'dsh-pet-tauri.exe'),join(portable,'dsh-pet-tauri.exe'));
-cpSync(join(release,'web'),join(portable,'web'),{recursive:true});
+cpSync(join(here,'web'),join(portable,'web'),{recursive:true});
 const files=dir=>readdirSync(dir,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?files(join(dir,entry.name)):[join(dir,entry.name)]);
 const originals=JSON.parse(readFileSync(join(portable,'web/reuse-manifest.json')));
 for(const item of originals)if(hash(join(portable,'web',item.path))!==item.sha256)throw Error('Reused file changed: '+item.path);
